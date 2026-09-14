@@ -34,17 +34,31 @@ def _draw_car(ax, x, y, psi, color, alpha=1.0, zorder=5):
 
 def animate_tracking(path: np.ndarray, result: SimResult, out_path: str,
                       title: str = "", fps: int = 20, stride: int = 2,
-                      show_horizon: bool = True):
-    """Render an animated GIF of the vehicle tracking `path` per `result`."""
-    fig, ax = plt.subplots(figsize=(7, 7))
+                      show_horizon: bool = True,
+                      obstacles: list[tuple[float, float, float]] | None = None,
+                      xlim: tuple[float, float] | None = None,
+                      ylim: tuple[float, float] | None = None,
+                      equal_aspect: bool = True,
+                      figsize: tuple[float, float] = (7, 7)):
+    """Render an animated GIF of the vehicle tracking `path` per `result`.
+    `obstacles`, if given, are drawn as filled circles: [(X, Y, radius), ...].
+    Set `equal_aspect=False` for scenarios (like a long straight lane) where a
+    true 1:1 aspect ratio would squash the plot into an unreadable sliver."""
+    fig, ax = plt.subplots(figsize=figsize)
     ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Reference path", zorder=1)
-    ax.set_aspect("equal")
+    if equal_aspect:
+        ax.set_aspect("equal")
     margin = 5
-    ax.set_xlim(path[:, 0].min() - margin, path[:, 0].max() + margin)
-    ax.set_ylim(path[:, 1].min() - margin, path[:, 1].max() + margin)
+    ax.set_xlim(*(xlim or (path[:, 0].min() - margin, path[:, 0].max() + margin)))
+    ax.set_ylim(*(ylim or (path[:, 1].min() - margin, path[:, 1].max() + margin)))
     ax.set_xlabel("X [m]")
     ax.set_ylabel("Y [m]")
     ax.set_title(title or f"{result.controller_name} trajectory tracking")
+
+    for i, (ox, oy, orad) in enumerate(obstacles or []):
+        ax.add_patch(patches.Circle((ox, oy), orad, facecolor="#f03e3e", edgecolor="#9a1414",
+                                     alpha=0.5, zorder=2, label="Obstacle" if i == 0 else None))
+
     ax.legend(loc="upper right", fontsize=8)
 
     driven_line, = ax.plot([], [], "-", color="#2f6feb", linewidth=2, label="Driven path", zorder=2)
@@ -61,15 +75,16 @@ def animate_tracking(path: np.ndarray, result: SimResult, out_path: str,
     ax.legend(loc="upper right", fontsize=8)
 
     frames = list(range(0, len(result.states), stride))
+    car_patch_holder = {"patch": None}
 
     def update(frame_idx):
         i = frames[frame_idx]
         state = result.states[i]
         driven_line.set_data(result.states[:i + 1, 0], result.states[:i + 1, 1])
 
-        for artist in list(ax.patches):
-            artist.remove()
-        _draw_car(ax, state[0], state[1], state[2], color="#2f6feb")
+        if car_patch_holder["patch"] is not None:
+            car_patch_holder["patch"].remove()
+        car_patch_holder["patch"] = _draw_car(ax, state[0], state[1], state[2], color="#2f6feb")
 
         if has_horizon and i > 0 and i - 1 < len(result.predicted_horizons):
             h = result.predicted_horizons[i - 1]
@@ -80,7 +95,8 @@ def animate_tracking(path: np.ndarray, result: SimResult, out_path: str,
             if tp is not None:
                 target_pt.set_data([tp[0]], [tp[1]])
 
-        ax.set_title(f"{title or result.controller_name}  |  t = {result.t[i]:.1f}s  v = {state[3]:.1f} m/s")
+        speed = state[3] if len(state) == 4 else float(np.hypot(state[3], state[4]))
+        ax.set_title(f"{title or result.controller_name}  |  t = {result.t[i]:.1f}s  v = {speed:.1f} m/s")
         return driven_line, horizon_line, target_pt
 
     anim = FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
@@ -95,37 +111,69 @@ def comparison_plot(path: np.ndarray, mpc_result: SimResult, pp_result: SimResul
 
     ax = axes[0, 0]
     ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Reference")
-    ax.plot(mpc_result.states[:, 0], mpc_result.states[:, 1], "-", color="#2f6feb", linewidth=2, label="MPC")
-    ax.plot(pp_result.states[:, 0], pp_result.states[:, 1], "-", color="#e8590c", linewidth=2, label="Pure Pursuit")
+    ax.plot(mpc_result.states[:, 0], mpc_result.states[:, 1], "-", color="#2f6feb", linewidth=2, label=mpc_result.controller_name)
+    ax.plot(pp_result.states[:, 0], pp_result.states[:, 1], "-", color="#e8590c", linewidth=2, label=pp_result.controller_name)
     ax.set_aspect("equal")
     ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
     ax.set_title("Driven path vs. reference")
     ax.legend(fontsize=9)
 
     ax = axes[0, 1]
-    ax.plot(mpc_result.t[1:], mpc_result.lateral_error, color="#2f6feb", label="MPC")
-    ax.plot(pp_result.t[1:], pp_result.lateral_error, color="#e8590c", label="Pure Pursuit")
+    ax.plot(mpc_result.t[1:], mpc_result.lateral_error, color="#2f6feb", label=mpc_result.controller_name)
+    ax.plot(pp_result.t[1:], pp_result.lateral_error, color="#e8590c", label=pp_result.controller_name)
     ax.axhline(0, color="black", linewidth=0.7)
     ax.set_xlabel("time [s]"); ax.set_ylabel("cross-track error [m]")
     ax.set_title("Lateral (cross-track) tracking error")
     ax.legend(fontsize=9)
 
     ax = axes[1, 0]
-    ax.plot(mpc_result.t[1:], np.rad2deg(mpc_result.controls[:, 1]), color="#2f6feb", label="MPC")
-    ax.plot(pp_result.t[1:], np.rad2deg(pp_result.controls[:, 1]), color="#e8590c", label="Pure Pursuit")
+    ax.plot(mpc_result.t[1:], np.rad2deg(mpc_result.controls[:, 1]), color="#2f6feb", label=mpc_result.controller_name)
+    ax.plot(pp_result.t[1:], np.rad2deg(pp_result.controls[:, 1]), color="#e8590c", label=pp_result.controller_name)
     ax.set_xlabel("time [s]"); ax.set_ylabel("steering angle [deg]")
     ax.set_title("Control input: steering")
     ax.legend(fontsize=9)
 
     ax = axes[1, 1]
-    ax.plot(mpc_result.t[1:], mpc_result.controls[:, 0], color="#2f6feb", label="MPC")
-    ax.plot(pp_result.t[1:], pp_result.controls[:, 0], color="#e8590c", label="Pure Pursuit")
+    ax.plot(mpc_result.t[1:], mpc_result.controls[:, 0], color="#2f6feb", label=mpc_result.controller_name)
+    ax.plot(pp_result.t[1:], pp_result.controls[:, 0], color="#e8590c", label=pp_result.controller_name)
     ax.set_xlabel("time [s]"); ax.set_ylabel("acceleration [m/s^2]")
     ax.set_title("Control input: acceleration")
     ax.legend(fontsize=9)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def obstacle_avoidance_plot(path: np.ndarray, result_with: SimResult, result_without: SimResult,
+                             obstacles: list[tuple[float, float, float]], out_path: str):
+    """Static before/after figure for the obstacle-avoidance demo: same NMPC
+    controller and scenario, avoidance constraint on vs. off.
+
+    Note: deliberately NOT equal-aspect -- the lane is ~100m long with ~2m of
+    lateral deviation, so a true equal-aspect plot would render as a nearly
+    flat line. The Y axis is visually exaggerated (with axhline lane-edge
+    markers to keep it honest about scale) so the maneuver is actually legible.
+    """
+    fig, ax = plt.subplots(figsize=(11, 4.5))
+    ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Reference lane center", zorder=1)
+    ax.plot(result_without.states[:, 0], result_without.states[:, 1], "-", color="#c92a2a",
+            linewidth=2.2, label="NMPC, avoidance OFF (collides)", zorder=2)
+    ax.plot(result_with.states[:, 0], result_with.states[:, 1], "-", color="#2f6feb",
+            linewidth=2.2, label="NMPC, avoidance ON", zorder=3)
+
+    for i, (ox, oy, orad) in enumerate(obstacles):
+        ax.add_patch(patches.Circle((ox, oy), orad, facecolor="#f03e3e", edgecolor="#9a1414",
+                                     alpha=0.55, zorder=4, label="Obstacle" if i == 0 else None))
+
+    ax.set_xlim(path[:, 0].min() - 3, path[:, 0].max() + 3)
+    ax.set_ylim(-3.2, 3.2)
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]  (lateral scale exaggerated vs. X -- see note)")
+    ax.set_title("Obstacle avoidance: same NMPC controller, hard keep-out constraint on vs. off")
+    ax.legend(fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 

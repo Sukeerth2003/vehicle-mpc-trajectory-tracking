@@ -34,7 +34,11 @@ class PurePursuitController:
         self._speed_integral = 0.0
 
     def solve(self, x0: np.ndarray, path: np.ndarray, nearest_idx: int) -> np.ndarray:
-        X, Y, psi, v = x0
+        # x0 is [X, Y, psi, v] for the kinematic model, or [X, Y, psi, vx, vy, r]
+        # for the dynamic model -- pure pursuit only needs position, heading,
+        # and a ground-speed estimate, so both are handled generically here.
+        X, Y, psi = x0[0], x0[1], x0[2]
+        v = x0[3] if len(x0) == 4 else float(np.hypot(x0[3], x0[4]))
         lookahead = self.cfg.lookahead_base + self.cfg.lookahead_gain * max(v, 0.0)
 
         # walk forward along the path until we exceed the lookahead distance

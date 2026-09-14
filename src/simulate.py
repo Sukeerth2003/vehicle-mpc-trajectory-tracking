@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from baseline_controller import PurePursuitConfig, PurePursuitController
+from dynamic_vehicle_model import DynamicBicycleModel
 from mpc_controller import MPCConfig, MPCController
+from nmpc_controller import NMPCConfig, NMPCController
 from trajectory import cumulative_arclength, get_trajectory, nearest_index, reference_horizon
 from vehicle_model import KinematicBicycleModel
 
@@ -32,7 +34,9 @@ class SimResult:
 
 
 def _cross_track_error(path: np.ndarray, idx: int, state: np.ndarray) -> float:
-    X, Y, psi, _ = state
+    # state is [X, Y, psi, ...] for both the 4-state kinematic model and the
+    # 6-state dynamic model -- only the first three entries are used here.
+    X, Y, psi = state[0], state[1], state[2]
     px, py = path[idx, 0], path[idx, 1]
     # signed distance: positive = vehicle left of the path tangent
     path_psi = path[idx, 2]
@@ -83,6 +87,68 @@ def run_mpc(path: np.ndarray, model: KinematicBicycleModel, mpc_cfg: MPCConfig,
         heading_error=np.array(head_err),
         predicted_horizons=horizons,
         controller_name="MPC",
+        solve_times=np.array(solve_times),
+    )
+
+
+def run_nmpc(path: np.ndarray, model: DynamicBicycleModel, nmpc_cfg: NMPCConfig,
+             sim_time: float, x0: np.ndarray | None = None,
+             obstacles: list[tuple[float, float, float]] | None = None,
+             disturbance_fn=None) -> SimResult:
+    """Like run_mpc, but for the dynamic bicycle model + NMPC controller.
+    x0 (if given) must be the full 6-state [X,Y,psi,vx,vy,r].
+
+    `disturbance_fn(state, step_idx) -> state`, if given, is applied to the
+    *true* plant state after every integration step (and is NOT known to the
+    controller/model) -- used for the robustness experiments to inject e.g. a
+    crosswind or sensor noise without the NMPC "cheating" by seeing it.
+    """
+    controller = NMPCController(model, nmpc_cfg)
+    n_steps = int(sim_time / model.dt)
+    s = cumulative_arclength(path)
+
+    if x0 is not None:
+        state = x0.copy()
+    else:
+        state = np.array([path[0, 0], path[0, 1], path[0, 2], 0.0, 0.0, 0.0])
+    states = [state.copy()]
+    controls = []
+    lat_err, head_err = [], []
+    horizons = []
+    solve_times = []
+
+    import time as _time
+    prev_idx = None
+    for step in range(n_steps):
+        idx = nearest_index(path, state[:2], prev_idx=prev_idx)
+        prev_idx = idx
+        ref_h = reference_horizon(path, s, idx, nmpc_cfg.horizon, model.dt, v_ref=path[idx, 3])
+
+        t0 = _time.perf_counter()
+        u = controller.solve(state, ref_h, obstacles=obstacles)
+        solve_times.append(_time.perf_counter() - t0)
+
+        state = model.step(state, u)
+        if disturbance_fn is not None:
+            state = disturbance_fn(state, step)
+        states.append(state.copy())
+        controls.append(u.copy())
+        lat_err.append(_cross_track_error(path, idx, state))
+        head_err.append(np.arctan2(np.sin(state[2] - path[idx, 2]), np.cos(state[2] - path[idx, 2])))
+        horizons.append(controller.last_predicted_states)
+
+        if idx >= len(path) - 5:
+            break
+
+    T = len(states)
+    return SimResult(
+        t=np.arange(T) * model.dt,
+        states=np.array(states),
+        controls=np.array(controls),
+        lateral_error=np.array(lat_err),
+        heading_error=np.array(head_err),
+        predicted_horizons=horizons,
+        controller_name="NMPC",
         solve_times=np.array(solve_times),
     )
 
