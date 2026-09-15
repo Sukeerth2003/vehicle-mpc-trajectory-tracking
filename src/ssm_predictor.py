@@ -177,3 +177,166 @@ def offsets_to_per_step_disp(offsets: torch.Tensor) -> torch.Tensor:
     first = offsets[:, :1, :]
     rest = offsets[:, 1:, :] - offsets[:, :-1, :]
     return torch.cat([first, rest], dim=1)
+
+
+class MultimodalObstaclePredictor(nn.Module):
+    """Same S4D encoder as ObstaclePredictor, but decodes M independent
+    autoregressive rollouts ("modes") instead of one, plus a per-mode
+    probability head. Built for genuinely ambiguous obstacles (see
+    obstacle_trajectory_data.py's "branch" pattern) where a single correct
+    answer doesn't exist during the ambiguous window: a unimodal model is
+    mathematically stuck predicting something *between* the true outcomes,
+    which matches neither of them.
+
+    Unlike ObstaclePredictor, this decoder is trained fully autoregressively
+    with NO teacher forcing at all: teacher-forcing one ground-truth future
+    into M competing mode rollouts is ill-posed (which mode is "responsible"
+    for matching it isn't known until after the fact -- see `mtp_loss`), so
+    every mode always feeds its own last prediction back as the next input,
+    during training exactly as at inference. That means there is no
+    train/inference mismatch for this head to begin with -- no exposure
+    bias, by construction, unlike the scheduled-sampling fix ObstaclePredictor
+    needed (see its docstring) for exactly that problem.
+
+    The M rollouts start from an *identical* encoded state (every mode has
+    seen the same observed window -- there's nothing in the past to make one
+    mode's encoding different from another's) and are differentiated only by
+    a small learned per-mode input embedding added at every decode step:
+    enough to let them diverge into different futures without giving each
+    mode its own encoder, which would be extra capacity spent on a
+    difference that only needs to show up in the decode.
+    """
+
+    def __init__(self, K: int = 10, H: int = 10, d_model: int = 48,
+                 d_state: int = 12, n_layers: int = 2, dt: float = 0.1, n_modes: int = 3):
+        super().__init__()
+        self.K, self.H, self.dt, self.n_modes = K, H, dt, n_modes
+        self.input_proj = nn.Linear(2, d_model)
+        self.blocks = nn.ModuleList([S4DBlock(d_model, d_state, dt) for _ in range(n_layers)])
+        self.output_proj = nn.Linear(d_model, 2)
+        # Init scale matters more than it looks like it should: too small
+        # (0.1, tried first) and the M rollouts start out nearly identical,
+        # so early "winner" assignment (see mtp_loss) is essentially noise
+        # rather than a meaningful signal, and training tends to snowball
+        # onto one dominant "generalist" mode that wins almost everywhere
+        # instead of letting different modes specialize to different
+        # outcomes -- a real instability hit while building this, not a
+        # hypothetical one (see train_multimodal_predictor.py's notes and
+        # the README's honest account of how well specialization actually
+        # ended up working). 0.5 gives the modes enough of a head start to
+        # differ meaningfully from the first few batches.
+        self.mode_embed = nn.Parameter(torch.randn(n_modes, d_model) * 0.5)
+        self.mode_head = nn.Linear(d_model, n_modes)
+
+    def forward(self, past_disp: torch.Tensor):
+        """past_disp: (B, K, 2) observed per-step displacements.
+        Returns (pred_offsets, pred_disp, mode_logits):
+          pred_offsets, pred_disp: (B, M, H, 2), one full rollout per mode.
+          mode_logits: (B, M), unnormalized -- softmax for probabilities."""
+        B = past_disp.shape[0]
+        device = past_disp.device
+        states = [blk.init_state(B, device) for blk in self.blocks]
+
+        u = None
+        for t in range(self.K):
+            u = self.input_proj(past_disp[:, t, :])
+            for i, blk in enumerate(self.blocks):
+                u, states[i] = blk.step(u, states[i])
+        ctx = u   # (B, d_model) -- pooled post-encoder context for the mode head
+        # Detached deliberately: mode_head is trained (see train_multimodal_
+        # predictor.py) against a target that is, for genuinely ambiguous
+        # inputs, fundamentally unpredictable from ctx (that's the whole
+        # point of "branch" -- see obstacle_trajectory_data.py). Letting
+        # that loss backprop into the shared encoder was a real bug found
+        # while building this: the encoder would get dragged around trying
+        # to extract a signal that provably isn't there, which measurably
+        # corrupted the (perfectly learnable) decoder specialization on top
+        # of it. Stop-gradient here makes mode_head a pure readout that
+        # cannot damage the representation the decoders depend on.
+        mode_logits = self.mode_head(ctx.detach())
+
+        last_obs_disp = past_disp[:, -1, :]
+        all_offsets, all_disp = [], []
+        for m in range(self.n_modes):
+            mode_states = [(a.clone(), b.clone()) for a, b in states]
+            prev_disp = last_obs_disp
+            preds = []
+            for h in range(self.H):
+                u_in = self.input_proj(prev_disp) + self.mode_embed[m]
+                for i, blk in enumerate(self.blocks):
+                    u_in, mode_states[i] = blk.step(u_in, mode_states[i])
+                pred_disp = self.output_proj(u_in)
+                preds.append(pred_disp)
+                prev_disp = pred_disp   # always autoregressive -- see class docstring
+            mode_disp = torch.stack(preds, dim=1)               # (B, H, 2)
+            mode_offsets = torch.cumsum(mode_disp, dim=1)
+            all_disp.append(mode_disp)
+            all_offsets.append(mode_offsets)
+
+        pred_disp = torch.stack(all_disp, dim=1)         # (B, M, H, 2)
+        pred_offsets = torch.stack(all_offsets, dim=1)   # (B, M, H, 2)
+        return pred_offsets, pred_disp, mode_logits
+
+
+def mtp_loss(pred_offsets: torch.Tensor, mode_logits: torch.Tensor,
+             true_offsets: torch.Tensor, cls_weight: float = 1.0, epsilon: float = 0.0,
+             forced_winner: torch.Tensor | None = None):
+    """Standard "multiple-trajectory-prediction" winner-take-all loss (Cui et
+    al., "Multimodal Trajectory Predictions for Autonomous Driving using Deep
+    Convolutional Networks," ICRA 2019): for each sample, find the mode whose
+    predicted trajectory is closest (MSE) to the true future -- the
+    "responsible" mode -- and backpropagate regression loss through *only*
+    that mode. The other modes get no gradient from this sample, which is
+    what lets different modes specialize to different outcomes instead of
+    all averaging toward the same answer (plain MSE across all modes would
+    do exactly that averaging, and defeat the entire point of a mixture
+    output). A cross-entropy term separately trains the mode-probability
+    head to predict which mode will win, so `mode_logits` becomes a genuine
+    (if imperfect) probability over outcomes rather than an unused output.
+
+    Plain (epsilon=0, forced_winner=None) winner-take-all turned out to have
+    a rich-get-richer failure mode while building this: a mode that wins
+    slightly more often early (for essentially arbitrary, init-dependent
+    reasons) gets all the regression gradient on those samples, gets better
+    at them, and so wins even more -- which, on the "branch" pattern
+    specifically, snowballed into both modes converging to nearly the same
+    "generalist" output instead of specializing to the two true outcomes
+    (confirmed by checking predicted final displacement per mode, not just
+    which mode nominally "won" -- see the README for the numbers). Two
+    things fixed it, both supported here:
+
+      - `forced_winner` (B,): when an entry is >= 0, that value is used
+        as the winner directly instead of arg-min -- for "branch" samples,
+        train_multimodal_predictor.py passes the pattern's own known
+        go/stop label (available at training time from the synthetic data
+        generator, even though the model never sees it as input) as a
+        privileged supervision signal. Pass -1 for samples that should
+        still use ordinary arg-min competition (every non-ambiguous
+        pattern -- there's only one true outcome, so it doesn't matter
+        which mode "claims" it).
+      - `epsilon`: with probability epsilon, the arg-min winner (for
+        entries where forced_winner is -1 or absent) is replaced by a
+        uniformly random mode, to keep gradient reaching under-used modes.
+        Kept here for reuse/completeness; train_multimodal_predictor.py
+        currently relies on forced_winner instead, since it is the more
+        direct fix for the one pattern that actually needs specialization.
+
+    pred_offsets: (B, M, H, 2). mode_logits: (B, M). true_offsets: (B, H, 2).
+    Returns (loss, winner_idx, per_mode_mse) -- the latter two are useful for
+    diagnosing mode collapse (all samples picking the same winner) during
+    training."""
+    err = pred_offsets - true_offsets.unsqueeze(1)              # (B, M, H, 2)
+    per_mode_mse = (err ** 2).mean(dim=(2, 3))                  # (B, M)
+    argmin_idx = per_mode_mse.argmin(dim=1)                     # (B,)
+    if epsilon > 0:
+        B, M = per_mode_mse.shape
+        random_idx = torch.randint(0, M, (B,), device=per_mode_mse.device)
+        use_random = torch.rand(B, device=per_mode_mse.device) < epsilon
+        winner_idx = torch.where(use_random, random_idx, argmin_idx)
+    else:
+        winner_idx = argmin_idx
+    if forced_winner is not None:
+        winner_idx = torch.where(forced_winner >= 0, forced_winner, winner_idx)
+    reg_loss = per_mode_mse.gather(1, winner_idx.unsqueeze(1)).mean()
+    cls_loss = F.cross_entropy(mode_logits, winner_idx)
+    return reg_loss + cls_weight * cls_loss, winner_idx, per_mode_mse

@@ -1,0 +1,48 @@
+{
+  "go": {
+    "cv": {
+      "min_dist_mean": 2.617485995578063,
+      "min_dist_std": 0.5254245592644652,
+      "max_lateral_deviation_mean": 0.3895065581223561,
+      "max_lateral_deviation_std": 0.41070441794722523,
+      "n_collisions": 0
+    },
+    "ssm_uni": {
+      "min_dist_mean": 2.5053021682368244,
+      "min_dist_std": 0.5992991151801228,
+      "max_lateral_deviation_mean": 0.20591599507311711,
+      "max_lateral_deviation_std": 0.11780493893580277,
+      "n_collisions": 0
+    },
+    "ssm_mm": {
+      "min_dist_mean": 2.535864752952224,
+      "min_dist_std": 0.5621317029680133,
+      "max_lateral_deviation_mean": 0.23430785378822927,
+      "max_lateral_deviation_std": 0.15835330897339203,
+      "n_collisions": 0
+    }
+  },
+  "stop": {
+    "cv": {
+      "min_dist_mean": 1.6084765010600695,
+      "min_dist_std": 0.2746637189945902,
+      "max_lateral_deviation_mean": 2.0556618137862324,
+      "max_lateral_deviation_std": 0.26616689035329716,
+      "n_collisions": 0
+    },
+    "ssm_uni": {
+      "min_dist_mean": 1.6995179035980679,
+      "min_dist_std": 0.10364807968331018,
+      "max_lateral_deviation_mean": 1.8153056256380136,
+      "max_lateral_deviation_std": 0.1524892780419919,
+      "n_collisions": 0
+    },
+    "ssm_mm": {
+      "min_dist_mean": 1.7740488165139092,
+      "min_dist_std": 0.10315271876679627,
+      "max_lateral_deviation_mean": 1.9257725999164828,
+      "max_lateral_deviation_std": 0.1429018581786044,
+      "n_collisions": 0
+    }
+  }
+}

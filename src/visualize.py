@@ -210,6 +210,44 @@ def moving_obstacle_plot(path: np.ndarray, ped_traj: np.ndarray, results: dict,
     plt.close(fig)
 
 
+def multimodal_obstacle_plot(path: np.ndarray, ped_traj: np.ndarray, results: dict,
+                              obstacle_radius: float, branch: str, out_path: str):
+    """Same idea as moving_obstacle_plot, for multimodal_obstacle_demo.py's
+    three methods (cv / ssm_uni / ssm_mm) instead of moving_obstacle_demo's
+    (naive / cv / ssm) -- kept as a separate function rather than
+    parameterizing moving_obstacle_plot so neither demo's plot depends on
+    the other's method names. `branch` ("go" or "stop") is the TRUE outcome
+    on this particular trial, shown in the title since it's the whole point
+    of this demo: the same three methods handling a case the pedestrian
+    actually crossed vs. a case they actually stopped."""
+    colors = {"cv": "#e8590c", "ssm_uni": "#f08c00", "ssm_mm": "#2f6feb"}
+    labels = {"cv": "constant-velocity", "ssm_uni": "unimodal SSM (Part 3)", "ssm_mm": "multimodal SSM (2 hypotheses)"}
+
+    fig, ax = plt.subplots(figsize=(11, 5))
+    ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Lane centerline", zorder=1)
+    ax.plot(ped_traj[:, 0], ped_traj[:, 1], "-", color="#495057", linewidth=2,
+            label=f"Pedestrian (true path -- {branch})", zorder=2)
+    ax.add_patch(patches.Circle(ped_traj[-1], obstacle_radius, facecolor="#868e96", edgecolor="#343a40",
+                                 alpha=0.5, zorder=3, label="Pedestrian, final position"))
+
+    for method in ["cv", "ssm_uni", "ssm_mm"]:
+        r = results[method]
+        tag = " (COLLISION)" if r["collision"] else ""
+        ax.plot(r["states"][:, 0], r["states"][:, 1], "-", color=colors[method], linewidth=2.2,
+                label=f"Ego, {labels[method]}{tag}", zorder=4)
+
+    ax.set_xlim(path[:, 0].min() - 3, path[:, 0].max() + 3)
+    ax.set_ylim(-8, 3)
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_title(f"Multimodal obstacle avoidance -- true outcome: pedestrian {branch}\n"
+                 "same NMPC, same true path, different obstacle-prediction strategies")
+    ax.legend(fontsize=8.5, loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def animate_moving_obstacle(path: np.ndarray, ped_traj: np.ndarray, result: dict,
                              obstacle_radius: float, out_path: str, title: str = "",
                              fps: int = 20, stride: int = 2):

@@ -74,7 +74,7 @@ class NMPCController:
         x0_p = opti.parameter(N_STATES)
         xref_p = opti.parameter(N_STATES, H + 1)
         uprev_p = opti.parameter(N_CONTROLS)
-        # Up to 4 circular obstacles. CasADi's opti.parameter is 2D, so each
+        # Up to 6 circular obstacles. CasADi's opti.parameter is 2D, so each
         # obstacle slot gets its own (2, H+1) center parameter (row 0 = x,
         # row 1 = y, one column per horizon step) rather than one fixed
         # (ox, oy) -- this is what lets a *moving* obstacle's predicted
@@ -84,7 +84,20 @@ class NMPCController:
         # case of the same center repeated at every column (see solve()).
         # Unused obstacle slots have radius 0 (see solve()) so their
         # constraint is a no-op.
-        n_obs_slots = 4
+        #
+        # Raised from 4 to 6 to fit *scenario-based* avoidance: a single
+        # physical obstacle predicted by a multimodal model (see
+        # ssm_predictor.MultimodalObstaclePredictor) contributes one slot
+        # PER plausible hypothesis, not one slot total -- the controller
+        # must stay clear of every sufficiently-probable future, not just
+        # the most likely one (see multimodal_obstacle_demo.py). 6 leaves
+        # headroom for e.g. 2 real obstacles x up to 3 hypotheses each, or
+        # a mix of static obstacles plus one multimodal one, without
+        # touching this constant again for the scenarios this project
+        # actually demonstrates. Unused slots cost a little solver
+        # overhead (six no-op constraints instead of four) but no behavior
+        # change -- verified against every pre-existing demo.
+        n_obs_slots = 6
         obs_center_p = [opti.parameter(2, H + 1) for _ in range(n_obs_slots)]
         obs_radius_p = opti.parameter(1, n_obs_slots)
         obstacle_active_p = opti.parameter(1, n_obs_slots)
@@ -243,9 +256,17 @@ class NMPCController:
         trajectory.reference_horizon returns for the kinematic/LTV-MPC
         controller).
 
-        obstacles: optional list of up to 4 `(center, radius)` circular
-        keep-out zones -- see _build_solver for how these enter as hard
-        constraints covering the whole horizon (k=0..H). `center` is either:
+        obstacles: optional list of up to `self._n_obs_slots` (2, 4 below,
+        6 currently) `(center, radius)` circular keep-out zones -- see
+        _build_solver for how these enter as hard constraints covering the
+        whole horizon (k=0..H). Nothing here requires each entry to be a
+        different physical obstacle: passing several entries with the same
+        radius but different `center` paths -- one per plausible future of
+        the SAME obstacle -- is exactly how scenario-based avoidance
+        against a multimodal predictor works (see
+        multimodal_obstacle_demo.py): the controller is required to stay
+        clear of every hypothesis simultaneously, not just the mean or the
+        most likely one. `center` is either:
           - a (2,) array/tuple `(ox, oy)`: a STATIC obstacle, broadcast to
             every horizon step (this project's original obstacle_demo.py
             usage, e.g. `[((40.0, 0.4), 1.5)]`); or

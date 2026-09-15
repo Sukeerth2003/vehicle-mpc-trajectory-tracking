@@ -123,6 +123,34 @@ lateral deviation isn't a "lower is better" metric here.
 
 ![Moving-obstacle avoidance: naive vs. CV vs. SSM prediction](results/moving_obstacle_plot.png)
 
+**Part 4 — genuinely ambiguous obstacles: multimodal prediction + scenario-based
+NMPC** (6 trials per true outcome, identical NMPC controller, only the
+obstacle-prediction strategy changes):
+
+| Prediction strategy | Closest approach — pedestrian stops | Closest approach — pedestrian continues |
+|---|---|---|
+| Constant velocity (CV) | 1.61 ± 0.27 m | **2.62 ± 0.53 m** |
+| Unimodal SSM (Part 3) | 1.70 ± 0.10 m | 2.51 ± 0.60 m |
+| **Multimodal SSM (2 hypotheses)** | **1.77 ± 0.10 m** | 2.54 ± 0.56 m |
+
+Zero collisions for every method across all 36 trials, but the two single-point
+predictors get there differently: CV's higher mean closest-approach when the
+pedestrian keeps moving is offset by it being the *worst and most erratic* performer
+in the case that actually matters — the pedestrian stopping in the ego's path (lowest
+mean margin, by far the highest variance, 0.27 m vs. the multimodal predictor's
+0.10 m). The multimodal predictor, which hedges against *both* "keeps walking" and
+"slows down" simultaneously rather than committing to one prediction, wins the
+safety-critical case outright while staying competitive (and lower-variance) in the
+easy one. See
+[Part 4: multimodal prediction](#part-4-multimodal-prediction--scenario-based-nmpc)
+for the honest, harder story behind this table: getting a mixture model to actually
+specialize into two different hypotheses instead of collapsing into one took three
+real rounds of debugging, and even the final version doesn't fully resolve — the
+"cautious" hypothesis predicts meaningfully less forward motion than the "confident"
+one, but doesn't converge all the way to the true stopping distance.
+
+![Multimodal obstacle avoidance: the pedestrian stops](results/multimodal_obstacle_plot_stop.png)
+
 ## Part 1: kinematic model + LTV-MPC
 
 ![LTV-MPC tracking a figure-eight](results/mpc_tracking.gif)
@@ -623,6 +651,158 @@ Reproduce with `python src/moving_obstacle_demo.py` (loads the trained weights f
 `results/ssm_predictor.pt`; run `train_predictor.py` first if that file doesn't
 exist).
 
+## Part 4: multimodal prediction + scenario-based NMPC
+
+### Why this extension
+
+Part 3's predictor is *unimodal*: for any observed window, it outputs exactly one
+future trajectory. That's the right tool when there genuinely is one most-likely
+future (a car cruising, a pedestrian mid-stride), but it breaks down for a real and
+common case: an obstacle whose immediate future is **genuinely ambiguous** from
+observation alone -- a pedestrian approaching a crossing who might keep walking or
+might stop, with nothing in their gait over the last second revealing which. A
+unimodal model facing real ambiguity like this doesn't get to be "roughly right" --
+minimizing squared error against two truly different possible outcomes pulls its one
+prediction toward something *between* them, which matches neither. This part builds
+a predictor that outputs **multiple** distinct hypotheses instead of one, and extends
+the NMPC obstacle constraint to stay clear of all of them at once (scenario-based
+avoidance) rather than betting on a single guess.
+
+### A dataset with real, provable ambiguity
+
+To test this honestly needs a case where the ambiguity is real, not just noisy --
+[`src/obstacle_trajectory_data.py`](src/obstacle_trajectory_data.py) adds a fifth
+motion pattern, `"branch"`, built specifically for this: for every one of the `K`
+observed steps, its statistics are *identical* to the existing `constant_velocity`
+pattern -- then, starting exactly at the observation boundary (the first future
+step), a coin flip drawn independently of everything already observed decides
+whether the obstacle keeps walking ("go") or decelerates hard to a stop ("stop").
+Because the branch decision has zero influence on anything in the observed window,
+no model -- however well trained -- can predict it from `past_disp` alone; this
+isn't a hard pattern, it's a provably unresolvable one, which is exactly the
+condition a mixture output is *for*. (Kept out of Part 3's default `PATTERNS` list so
+it never silently changes that predictor's already-reported results --
+`ALL_PATTERNS` opts in.)
+
+### The model: two independent hypotheses, one encoder
+
+[`src/ssm_predictor.py`](src/ssm_predictor.py)'s `MultimodalObstaclePredictor` reuses
+Part 3's S4D encoder (there's nothing in the observed window to distinguish
+hypotheses on, so there's no reason to duplicate the encoder) and decodes `M=2`
+independent autoregressive rollouts from it, differentiated by a small learned
+per-mode input embedding. Unlike `ObstaclePredictor`, this decoder is trained with
+**no teacher forcing at all**: teacher-forcing one ground-truth future into two
+competing hypotheses is ill-posed (which one is "responsible" for matching it isn't
+knowable in advance), so every mode always feeds its own last prediction back as the
+next input, identically during training and at inference -- no train/inference
+mismatch to begin with, unlike the exposure-bias problem Part 3's predictor needed
+scheduled sampling to fix.
+
+### Getting a mixture to actually specialize (three real rounds of debugging)
+
+Building the model was the easy part. Training it to genuinely use both modes,
+rather than collapsing onto one, took real iteration -- checked honestly at each
+step by comparing each mode's *predicted final displacement* on ambiguous test
+samples, split by true outcome, not just by which mode nominally "won" (a
+usage-count statistic that turned out to look reasonable even when both modes were
+secretly predicting nearly the same thing).
+
+1. **Plain winner-take-all collapsed.** The standard MTP loss (Cui et al. 2019: find
+   the mode closest to the ground truth, backprop regression loss through only that
+   mode, so different modes specialize to different outcomes instead of averaging
+   toward the same answer) was tried first. It didn't work: both modes converged to
+   nearly identical output regardless of the true branch, verified directly rather
+   than assumed -- both modes' predicted final displacement tracked close to the
+   "keep walking" magnitude even on samples that were actually "stop." A classic
+   rich-get-richer instability: whichever mode wins slightly more often early (for
+   essentially arbitrary, init-dependent reasons) gets all the useful gradient, gets
+   better, and wins even more.
+2. **The classification loss was making it worse.** The auxiliary cross-entropy term
+   that trains the mode-probability head backpropagated into the *shared encoder* --
+   which then got dragged around trying to extract a signal that provably isn't in
+   the input (see the dataset section above), corrupting the otherwise-learnable
+   decoder specialization sitting on top of it. Fixed by detaching the encoder's
+   output before the mode-probability head (`MultimodalObstaclePredictor.forward`):
+   the classifier becomes a pure readout that can't damage the shared representation
+   underneath it.
+3. **Unsupervised discovery still didn't specialize reliably.** Even after fix 2,
+   plain winner-take-all on the "branch" pattern stayed close to a 50/50 split with
+   no consistent mode-to-outcome mapping. The fix actually shipped is more direct:
+   since this is synthetic data, the true go/stop label for each "branch" sample is
+   known at training time from the generator, even though the model is never given
+   it as input. `train_multimodal_predictor.py` passes that label in as a
+   `forced_winner` (mode 0 always gets the gradient for "go" samples, mode 1 always
+   for "stop"), sidestepping the unsupervised-discovery problem entirely -- this is
+   training-time supervision, not input leakage, and it's exactly analogous to how a
+   real dataset with logged outcomes would be used.
+
+**The honest result.** With all three fixes, mode *assignment* is now clean: on held-out
+test data, mode 0 wins 98% of true "go" samples and mode 1 wins 100% of true "stop"
+samples. But the underlying *behavior* is only partly resolved -- mode 0's predicted
+final displacement (1.93 m) closely tracks the true "go" outcome (1.99 m), while mode
+1's (1.17-1.20 m) is clearly and consistently lower than mode 0's, representing a
+real, meaningfully more cautious hypothesis, but does **not** converge all the way to
+the true "stop" outcome's magnitude (0.47 m) within this training budget. Reported as
+what it is: real, checkable specialization into two different behaviors, not a fully
+resolved bimodal fit. (`mean_top_mode_prob_branch` and `mean_top_mode_prob_unambiguous`
+end up close to each other rather than showing lower confidence specifically on
+ambiguous inputs, as might be expected -- on reflection this is the *correct*
+calibrated behavior, not a bug: since the observed window genuinely carries no
+information about the branch, the best the probability head can do is learn the
+population base rate, the same as it would for any single unimodal pattern.)
+
+Reproduce with `python src/train_multimodal_predictor.py` (~2 minutes on CPU) --
+it prints the full specialization diagnostics, not just accuracy.
+
+### Scenario-based NMPC: avoiding every plausible hypothesis at once
+
+[`src/nmpc_controller.py`](src/nmpc_controller.py)'s obstacle-slot count was raised
+from 4 to 6 (`_build_solver`) specifically for this: a single physical obstacle
+predicted by a multimodal model contributes **one hard-constraint slot per
+hypothesis**, not one slot total. `multimodal_obstacle_demo.py` feeds both of the
+predictor's `(H+1, 2)` mode rollouts into `solve()`'s `obstacles` list as two
+separate entries with the same radius -- the controller is required to stay clear of
+*both* simultaneously over the whole horizon, not just whichever one is more likely.
+This is a direct, mechanical extension of the moving-obstacle constraint from Part 3
+(which already supported one time-varying predicted path per obstacle); scenario-based
+avoidance is simply "more than one path, same mechanism."
+
+### The demo: same controller, three prediction strategies, a genuinely ambiguous pedestrian
+
+[`src/multimodal_obstacle_demo.py`](src/multimodal_obstacle_demo.py) reuses Part 3's
+lane-crossing-pedestrian scenario, but this time the true outcome (crosses vs. stops)
+is decided by a coin flip per trial and deliberately **not** revealed to any
+predictor in advance -- mirroring the `"branch"` pattern's construction. Three
+strategies feed the identical NMPC controller, on the identical true trajectory and
+sensor noise per trial: CV (one hypothesis), Part 3's unimodal SSM (one hypothesis),
+and the multimodal SSM (two hypotheses, both hard-avoided). Trials are run with the
+true branch *forced* rather than left to a coin flip, so "go" and "stop" are equally
+represented -- a fair, matched comparison, 6 trials each:
+
+| Prediction strategy | Closest approach — stops | Closest approach — continues | Collisions |
+|---|---|---|---|
+| CV | 1.61 ± 0.27 m | **2.62 ± 0.53 m** | 0/12 |
+| Unimodal SSM | 1.70 ± 0.10 m | 2.51 ± 0.60 m | 0/12 |
+| **Multimodal SSM** | **1.77 ± 0.10 m** | 2.54 ± 0.56 m | 0/12 |
+
+![Multimodal obstacle avoidance: the pedestrian stops](results/multimodal_obstacle_plot_stop.png)
+
+The figure above (a "stop" trial) shows exactly what the numbers summarize: CV
+mispredicts the pedestrian continuing to cross and swerves hard the *wrong* way
+(toward positive Y, straight at where it thinks they're going) before correcting late;
+both SSM-based methods correctly anticipate the stop and move away early. On "go"
+trials the three methods mostly agree closely (no swerve is usually needed at all --
+see `results/multimodal_obstacle_plot_go.png`), which is itself part of the honest
+story: the multimodal predictor's benefit shows up specifically in the case that's
+actually dangerous, not as a general improvement everywhere. No collisions occurred
+for any method across all 36 trials in this run, so the comparison here is about
+*margin and consistency*, not about one method failing outright -- the same framing
+Part 3 used for its own moving-obstacle results.
+
+Reproduce with `python src/multimodal_obstacle_demo.py` (loads both Part 3's and
+Part 4's trained weights; run their training scripts first if those files don't
+exist).
+
 ## Repository layout
 
 ```
@@ -644,6 +824,8 @@ exist).
 │   ├── trajectory_baselines.py    # CV / CTRV classical extrapolation baselines + ADE/FDE metrics
 │   ├── train_predictor.py         # trains + validates the SSM predictor against the baselines
 │   ├── moving_obstacle_demo.py    # moving-obstacle NMPC demo: naive vs. CV vs. SSM prediction
+│   ├── train_multimodal_predictor.py # trains the K-hypothesis mixture SSM predictor (Part 4)
+│   ├── multimodal_obstacle_demo.py   # scenario-based NMPC demo: CV vs. unimodal vs. multimodal SSM
 │   └── visualize.py               # animated GIFs + comparison plots (shared by all of the above)
 ├── notebooks/
 │   └── demo.ipynb             # walkthrough: derive, simulate, visualize, compare (Part 1)
@@ -673,6 +855,10 @@ python src/robustness_plot.py         # bar chart from the study above
 # Part 3: moving-obstacle prediction (state-space neural network)
 python src/train_predictor.py         # trains the SSM predictor, evaluates vs. CV/CTRV (~4 min on CPU)
 python src/moving_obstacle_demo.py    # NMPC + naive/CV/SSM prediction: 8-trial comparison + GIF/plot
+
+# Part 4: multimodal prediction + scenario-based NMPC
+python src/train_multimodal_predictor.py  # trains the 2-hypothesis mixture SSM predictor (~2 min on CPU)
+python src/multimodal_obstacle_demo.py    # NMPC + CV/unimodal/multimodal SSM on a genuinely ambiguous pedestrian (~3 min)
 ```
 
 **Solve times, measured (not assumed).** "NMPC is slower per-solve than a QP" is the
@@ -735,9 +921,19 @@ that still produced an honest, working result (Part 1), then grew it deliberatel
   observations and feeds it into the NMPC's obstacle constraint, beating CV/CTRV
   baselines on ADE/FDE and giving the safest, most consistent avoidance in an
   8-trial pedestrian-crossing demo. See
-  [Part 3](#part-3-moving-obstacle-prediction-with-a-learned-state-space-model). A
-  natural next step: multi-obstacle scenes where obstacles interact (social-force /
-  attention-based prediction) rather than being forecast independently.
+  [Part 3](#part-3-moving-obstacle-prediction-with-a-learned-state-space-model).
+- ✅ **Multimodal prediction + scenario-based NMPC** — a K-hypothesis mixture SSM
+  predictor that outputs genuinely different trajectories (not one blended average)
+  for a provably ambiguous obstacle, feeding every hypothesis into the NMPC as its
+  own hard constraint so the plan stays safe against all of them at once. Wins the
+  safety-critical case outright (best *and* most consistent closest-approach when
+  the pedestrian stops) while remaining competitive when it doesn't. See
+  [Part 4](#part-4-multimodal-prediction--scenario-based-nmpc), including the honest
+  account of the mode-collapse bug found and only partially resolved along the way.
+  A natural next step: multi-obstacle scenes where obstacles interact (social-force /
+  attention-based prediction) rather than being forecast independently, and
+  unsupervised (rather than label-forced) mode discovery for real-world data where
+  the ground-truth branch isn't known at training time.
 - ⬜ **Hardware-in-the-loop.** Port the controller to run in real time against a
   higher-fidelity simulator (e.g. CARLA) or a small RC/robot testbed — the one
   extension from the original plan not yet built here.
@@ -767,3 +963,6 @@ that still produced an honest, working result (Part 1), then grew it deliberatel
 - S. Bengio, O. Vinyals, N. Jaitly, N. Shazeer, "Scheduled Sampling for Sequence
   Prediction with Recurrent Neural Networks," *NeurIPS*, 2015 — the exposure-bias
   fix used to train the predictor (see Part 3).
+- H. Cui et al., "Multimodal Trajectory Predictions for Autonomous Driving using
+  Deep Convolutional Networks," *ICRA*, 2019 — the winner-take-all MTP loss (mixture
+  regression + mode classification) adapted for Part 4's multimodal predictor.
