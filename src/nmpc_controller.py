@@ -74,10 +74,20 @@ class NMPCController:
         x0_p = opti.parameter(N_STATES)
         xref_p = opti.parameter(N_STATES, H + 1)
         uprev_p = opti.parameter(N_CONTROLS)
-        # up to 4 static circular obstacles: [ox, oy, radius] per column; unused
-        # slots have radius 0 (see solve()) so their constraint is a no-op.
-        obstacles_p = opti.parameter(3, 4)
-        obstacle_active_p = opti.parameter(1, 4)
+        # Up to 4 circular obstacles. CasADi's opti.parameter is 2D, so each
+        # obstacle slot gets its own (2, H+1) center parameter (row 0 = x,
+        # row 1 = y, one column per horizon step) rather than one fixed
+        # (ox, oy) -- this is what lets a *moving* obstacle's predicted
+        # future path (e.g. from ssm_predictor.ObstaclePredictor) become a
+        # keep-out constraint that tracks it through the horizon, not just
+        # where it is right now. A static obstacle is just the degenerate
+        # case of the same center repeated at every column (see solve()).
+        # Unused obstacle slots have radius 0 (see solve()) so their
+        # constraint is a no-op.
+        n_obs_slots = 4
+        obs_center_p = [opti.parameter(2, H + 1) for _ in range(n_obs_slots)]
+        obs_radius_p = opti.parameter(1, n_obs_slots)
+        obstacle_active_p = opti.parameter(1, n_obs_slots)
 
         Q, Qf, R, Rd = self.cfg.Q, self.cfg.Qf, self.cfg.R, self.cfg.Rd
 
@@ -98,19 +108,25 @@ class NMPCController:
             opti.subject_to(opti.bounded(-self.cfg.max_accel_rate * dt, du[0], self.cfg.max_accel_rate * dt))
             opti.subject_to(opti.bounded(-self.cfg.max_steer_rate * dt, du[1], self.cfg.max_steer_rate * dt))
 
-            # Obstacle avoidance: a *hard* keep-out constraint for every active
-            # obstacle over the horizon, i.e. ||pos_k - obstacle|| >= radius.
-            # Inactive obstacle slots are parked far away (see solve()) so the
-            # constraint is trivially satisfied and effectively a no-op for
-            # them. We also add a matching soft penalty near the boundary --
-            # not for feasibility (the hard constraint already guarantees
-            # that) but because IPOPT converges much more reliably when the
-            # cost function itself already "wants" to move away from the
-            # obstacle, rather than relying solely on constraint projection.
-            for j in range(4):
-                d2 = (X[0, k] - obstacles_p[0, j]) ** 2 + (X[1, k] - obstacles_p[1, j]) ** 2
-                opti.subject_to(d2 >= obstacles_p[2, j] ** 2)
-                margin = obstacles_p[2, j] ** 2 * 1.3 - d2   # start "pushing" a bit before the hard boundary
+        # Obstacle avoidance: a *hard* keep-out constraint against every
+        # active obstacle at every step of the horizon INCLUDING the
+        # terminal step, i.e. ||pos_k - center_{j,k}|| >= radius_j for
+        # k = 0..H. Each obstacle's center is looked up per-step from
+        # obs_center_p[j][:, k] -- a moving obstacle's predicted path, or a
+        # static one repeated across every column (see solve()). Inactive
+        # obstacle slots have radius 0 (see solve()) so the constraint is
+        # trivially satisfied and effectively a no-op for them. We also add
+        # a matching soft penalty near the boundary -- not for feasibility
+        # (the hard constraint already guarantees that) but because IPOPT
+        # converges much more reliably when the cost function itself already
+        # "wants" to move away from the obstacle, rather than relying solely
+        # on constraint projection.
+        for k in range(H + 1):
+            for j in range(n_obs_slots):
+                cx, cy = obs_center_p[j][0, k], obs_center_p[j][1, k]
+                d2 = (X[0, k] - cx) ** 2 + (X[1, k] - cy) ** 2
+                opti.subject_to(d2 >= obs_radius_p[0, j] ** 2)
+                margin = obs_radius_p[0, j] ** 2 * 1.3 - d2   # start "pushing" a bit before the hard boundary
                 cost += obstacle_active_p[0, j] * self.cfg.obstacle_weight * ca.fmax(0, margin) ** 2
 
         e_terminal = X[:, H] - xref_p[:, H]
@@ -131,7 +147,9 @@ class NMPCController:
         self._opti = opti
         self._X, self._U = X, U
         self._x0_p, self._xref_p, self._uprev_p = x0_p, xref_p, uprev_p
-        self._obstacles_p, self._obstacle_active_p = obstacles_p, obstacle_active_p
+        self._obs_center_p, self._obs_radius_p = obs_center_p, obs_radius_p
+        self._obstacle_active_p = obstacle_active_p
+        self._n_obs_slots = n_obs_slots
 
     # ------------------------------------------------------------------
     def _estimate_reference_yaw_rate(self, ref_horizon_4col: np.ndarray) -> np.ndarray:
@@ -220,12 +238,29 @@ class NMPCController:
         return X_guess, U_guess
 
     def solve(self, x0: np.ndarray, ref_horizon_4col: np.ndarray,
-              obstacles: list[tuple[float, float, float]] | None = None) -> np.ndarray:
+              obstacles: list[tuple] | None = None) -> np.ndarray:
         """ref_horizon_4col: (H+1, 4) array of [X,Y,psi,v] (same format
         trajectory.reference_horizon returns for the kinematic/LTV-MPC
-        controller). obstacles: optional list of (ox, oy, radius) static
-        circular keep-out zones -- see _build_solver for how these enter as
-        hard constraints. Returns u* = [ax, delta]."""
+        controller).
+
+        obstacles: optional list of up to 4 `(center, radius)` circular
+        keep-out zones -- see _build_solver for how these enter as hard
+        constraints covering the whole horizon (k=0..H). `center` is either:
+          - a (2,) array/tuple `(ox, oy)`: a STATIC obstacle, broadcast to
+            every horizon step (this project's original obstacle_demo.py
+            usage, e.g. `[((40.0, 0.4), 1.5)]`); or
+          - an (H+1, 2) array: a MOVING obstacle's PREDICTED position at
+            each horizon step k=0..H (e.g. from
+            ssm_predictor.ObstaclePredictor's rollout, converted to world
+            positions -- see moving_obstacle_demo.py). The keep-out
+            constraint then tracks the obstacle's predicted future path
+            instead of where it is right now, which matters exactly when the
+            obstacle is moving fast enough, or the horizon is long enough,
+            that "it will still be here in 1 second" stops being a safe
+            assumption.
+        For backward compatibility, the old `(ox, oy, radius)` triple form
+        (as used before this project added moving-obstacle support) is also
+        accepted and treated as static. Returns u* = [ax, delta]."""
         H = self.cfg.horizon
         ref6 = self._build_full_reference(ref_horizon_4col)
         # NOTE: the dynamically-consistent guess (_build_consistent_guess) is a
@@ -242,18 +277,30 @@ class NMPCController:
         # d^2 >= radius^2 trivially true everywhere (position is irrelevant),
         # which is more robust than "parking far away" with a nonzero radius
         # would be (that leaves d^2 needing to also be astronomically large).
-        obs_arr = np.zeros((3, 4))
-        obs_active = np.zeros((1, 4))
+        centers = [np.zeros((H + 1, 2)) for _ in range(self._n_obs_slots)]
+        obs_radius = np.zeros((1, self._n_obs_slots))
+        obs_active = np.zeros((1, self._n_obs_slots))
         if obstacles:
-            for j, (ox, oy, rad) in enumerate(obstacles[:4]):
-                obs_arr[:, j] = [ox, oy, rad]
+            for j, entry in enumerate(obstacles[: self._n_obs_slots]):
+                if len(entry) == 3:      # legacy (ox, oy, radius) static triple
+                    center, rad = entry[:2], entry[2]
+                else:                     # (center, radius)
+                    center, rad = entry
+                center = np.asarray(center, dtype=float)
+                if center.ndim == 1:      # static (2,) -> broadcast to every horizon step
+                    centers[j][:, :] = center
+                else:                      # moving (H+1, 2) predicted positions
+                    centers[j][:, :] = center
+                obs_radius[0, j] = rad
                 obs_active[0, j] = 1.0
 
         opti = self._opti
         opti.set_value(self._x0_p, x0)
         opti.set_value(self._xref_p, ref6.T)
         opti.set_value(self._uprev_p, self.prev_u)
-        opti.set_value(self._obstacles_p, obs_arr)
+        for j in range(self._n_obs_slots):
+            opti.set_value(self._obs_center_p[j], centers[j].T)   # (2, H+1)
+        opti.set_value(self._obs_radius_p, obs_radius)
         opti.set_value(self._obstacle_active_p, obs_active)
 
         if self._prev_solution is not None:
@@ -270,18 +317,39 @@ class NMPCController:
             X_opt = sol.value(self._X)
             U_opt = sol.value(self._U)
         except RuntimeError:
-            # IPOPT failed to converge (e.g. hit max_iter) -- deliberately do
-            # NOT fall back to opti.debug.value() here. That "last iterate"
-            # can be an arbitrarily bad, dynamically-inconsistent point this
-            # deep into a failed nonconvex solve, and -- worse -- feeding it
-            # back in as next step's warm start tends to cascade the failure
-            # for many steps in a row (this was a real bug found while
-            # stress-testing under sensor noise; see the README). Falling
-            # back to the dynamically-consistent forward-simulated guess is
-            # a safe, bounded-quality substitute: not optimal, but a valid
-            # trajectory that won't poison future warm starts. Only computed
-            # here, on the (rare) failure path -- see the note above solve().
-            X_opt, U_opt = self._build_consistent_guess(x0, ref_horizon_4col)
+            # IPOPT failed to converge (e.g. hit max_iter, or reported the
+            # problem infeasible) -- deliberately do NOT fall back to
+            # opti.debug.value() here. That "last iterate" can be an
+            # arbitrarily bad, dynamically-inconsistent point this deep into
+            # a failed nonconvex solve, and -- worse -- feeding it back in as
+            # next step's warm start tends to cascade the failure for many
+            # steps in a row (a real bug found while stress-testing under
+            # sensor noise; see the README).
+            #
+            # When an obstacle is active, prefer the PREVIOUS solve's
+            # shifted trajectory over a fresh _build_consistent_guess here:
+            # _build_consistent_guess only knows how to track the reference
+            # path -- it has no notion of obstacles at all -- so on its own
+            # it is a genuine safety bug, not just a quality compromise. This
+            # was found the same way the earlier bugs were: benchmarking the
+            # moving-obstacle demo (moving_obstacle_demo.py) produced actual
+            # collisions, traced to IPOPT reporting
+            # "Infeasible_Problem_Detected" for several consecutive steps
+            # right as the obstacle became a binding constraint, each one
+            # falling back to an obstacle-blind guess that drove straight
+            # through where the obstacle was predicted to be. The previous
+            # solve's shifted trajectory, by contrast, was itself computed
+            # respecting the obstacle constraint (as of one step ago) -- a
+            # stale plan that still avoids the obstacle beats a fresh one
+            # that never considered it. Only fall back to the obstacle-blind
+            # guess when there is no previous solution to reuse, or when no
+            # obstacle is active (Part 2's original failure mode, where this
+            # fallback is exactly the right choice).
+            obstacle_active = bool(np.any(obs_active))
+            if obstacle_active and self._prev_solution is not None:
+                X_opt, U_opt = self._prev_solution
+            else:
+                X_opt, U_opt = self._build_consistent_guess(x0, ref_horizon_4col)
 
         # warm start next call: shift the horizon by one step
         X_shifted = np.hstack([X_opt[:, 1:], X_opt[:, -1:]])

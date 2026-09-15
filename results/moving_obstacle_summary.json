@@ -1,0 +1,23 @@
+{
+  "naive": {
+    "min_dist_mean": 1.7537849186836167,
+    "min_dist_std": 0.017115467363512882,
+    "max_lateral_deviation_mean": 1.8906700599238175,
+    "max_lateral_deviation_std": 0.2247001745619609,
+    "n_collisions": 0
+  },
+  "cv": {
+    "min_dist_mean": 1.5005044391649132,
+    "min_dist_std": 0.49089657770265077,
+    "max_lateral_deviation_mean": 2.221488729782793,
+    "max_lateral_deviation_std": 1.013842900282415,
+    "n_collisions": 0
+  },
+  "ssm": {
+    "min_dist_mean": 1.8016678336485323,
+    "min_dist_std": 0.12096862803202832,
+    "max_lateral_deviation_mean": 2.372540298815058,
+    "max_lateral_deviation_std": 0.6551593172507756,
+    "n_collisions": 0
+  }
+}

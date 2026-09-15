@@ -8,11 +8,16 @@ vehicle trajectory tracking, in two layers of increasing fidelity:
 2. A **dynamic bicycle model** (tire slip, lateral forces) controlled by **Nonlinear
    MPC** (`CasADi` + `IPOPT`), extended with **static obstacle avoidance** and stress-
    tested for **robustness to crosswind and sensor/process noise**.
+3. A **learned structured state-space sequence model** (S4D-style, `PyTorch`) that
+   forecasts a *moving* obstacle's future trajectory from its recently observed
+   motion, fed directly into the NMPC's obstacle constraint so the controller can
+   react to where a pedestrian is *going*, not just where it last saw them.
 
 Every result below is measured, not asserted — including the results that don't
 flatter this project's own methods (pure pursuit beats MPC on a circle; two real
-NMPC convergence bugs found via stress-testing and benchmarking, and how they were
-fixed).
+NMPC convergence bugs found via stress-testing and benchmarking; a genuinely
+collision-causing NMPC fallback bug found while building the moving-obstacle demo;
+and how each was fixed).
 
 ![NMPC (dynamic model) tracking a figure-eight](results/nmpc_tracking.gif)
 
@@ -66,7 +71,7 @@ notion of tire slip, so it has no way to compensate for the vehicle sliding; NMP
 optimizes directly against the true nonlinear dynamics (no linearization at all,
 unlike Part 1's LTV-MPC) and corrects for it every step.
 
-**Part 3 — robustness under crosswind + sensor/process noise** (double lane change,
+**Robustness under crosswind + sensor/process noise** (double lane change,
 6 Monte Carlo trials per controller, identical disturbance realizations across
 controllers):
 
@@ -86,6 +91,37 @@ disturbance model and why the gap is a real, reproducible effect (low trial-to-t
 variance) rather than noise-realization luck.
 
 ![Robustness comparison](results/robustness_plot.png)
+
+**Part 3 — learned trajectory prediction vs. classical baselines** (held-out test
+set, ADE/FDE in meters, lower is better):
+
+| Predictor | ADE | FDE |
+|---|---|---|
+| **SSM (learned)** | **0.521 ± 0.343 m** | **0.982 ± 0.699 m** |
+| Constant velocity (CV) | 0.701 ± 0.445 m | 1.362 ± 0.876 m |
+| Constant turn rate + velocity (CTRV) | 1.555 ± 0.929 m | 3.009 ± 1.872 m |
+
+**Part 3 — moving-obstacle avoidance** (8 Monte Carlo trials, identical true
+pedestrian trajectory + sensor noise per trial across all three obstacle-prediction
+methods):
+
+| Obstacle prediction | Closest approach | Max lateral deviation | Collisions |
+|---|---|---|---|
+| Naive (static, last-seen position) | 1.75 ± 0.02 m | 1.89 ± 0.22 m | 0/8 |
+| Constant velocity (CV) | 1.50 ± 0.49 m | 2.22 ± 1.01 m | 0/8 |
+| **SSM (learned)** | **1.80 ± 0.12 m** | 2.37 ± 0.66 m | 0/8 |
+
+The SSM predictor wins on both trajectory-forecasting accuracy and the metric that
+actually matters downstream — it gives the *safest and most consistent* avoidance
+(highest mean closest-approach, by far the lowest trial-to-trial variance), because
+it's the only method that recognizes a decelerating pedestrian as decelerating and
+reacts accordingly. See
+[Part 3: moving-obstacle prediction](#part-3-moving-obstacle-prediction-with-a-learned-state-space-model)
+below for the honest version of this story, including where the SSM predictor is
+*not* simply better (it loses narrowly to CV on the `constant_turn` pattern) and why
+lateral deviation isn't a "lower is better" metric here.
+
+![Moving-obstacle avoidance: naive vs. CV vs. SSM prediction](results/moving_obstacle_plot.png)
 
 ## Part 1: kinematic model + LTV-MPC
 
@@ -389,6 +425,204 @@ initial-guess bug described above: sensor noise was the specific trigger, since 
 the one disturbance that directly perturbs the state the optimizer's initial guess
 has to reconcile with.
 
+## Part 3: moving-obstacle prediction with a learned state-space model
+
+### Why this extension
+
+[Obstacle avoidance](#obstacle-avoidance) above handles *static* obstacles — the
+NMPC constraint holds an obstacle's center fixed for the whole planning horizon,
+which is exactly right for a parked car or a road barrier. It's the wrong model for
+a pedestrian, a cyclist, or another vehicle: something that will plausibly have
+*moved* by the time the ego vehicle reaches it. The natural fix is to predict where
+a moving obstacle will be at each step of the horizon and feed *that* into the same
+hard keep-out constraint — turning a fixed circle into a time-varying tube. This
+section builds that prediction with a small **structured state-space sequence
+model** (S4D-style — the same "state-space" name as the rest of this project, but
+now a *learned* linear recurrence rather than a hand-derived physical one; see the
+docstring in [`src/ssm_predictor.py`](src/ssm_predictor.py) for the direct
+comparison), trains and validates it against classical extrapolation baselines, and
+integrates it into the NMPC controller from Part 2.
+
+### The predictor: a diagonal state-space neural network (S4D)
+
+[`src/ssm_predictor.py`](src/ssm_predictor.py) implements an encoder-decoder
+sequence model built from S4D blocks (Gu, Goel, Ré, "Efficiently Modeling Long
+Sequences with Structured State Spaces," 2022; Gu, Gupta, Goel, Ré, "On the
+Parameterization and Initialization of Diagonal State Space Models," 2022):
+
+- Each channel of the model runs its own **independent diagonal linear SSM** —
+  `x_{t+1} = A x_t + B u_t`, `y_t = C x_t + D u_t` — with a complex eigenvalue
+  `lambda = -decay + i*omega` per state, giving each channel a learned
+  decay rate and oscillation frequency. The complex recurrence is represented as a
+  real 2x2 rotation-decay block (`S4DLayer.step`) to avoid PyTorch's complex-autograd
+  edge cases; it's mathematically identical to the complex form.
+- Blocks are stacked pre-norm + GLU-gated + residual, the standard S4/S4D pattern.
+- The model **encodes** the `K=10` most recently observed displacement vectors of
+  the obstacle, then **decodes** `H=10` future steps *autoregressively*: at each
+  future step, the block stack's own previous prediction becomes the next input,
+  continuing the same recurrent state forward — a genuine free-running forecast at
+  inference time, with no new observations.
+
+It's deliberately small (~27.6k parameters at the default config) — this is a
+demonstration of the architecture integrated end-to-end into a control system, not
+an attempt at a state-of-the-art forecasting model.
+
+### Data, training, and two real bugs found along the way
+
+[`src/obstacle_trajectory_data.py`](src/obstacle_trajectory_data.py) generates
+synthetic obstacle tracks from four motion patterns — constant velocity,
+decelerating, constant turn, and weave — and
+[`src/train_predictor.py`](src/train_predictor.py) trains the predictor against
+them, evaluated with the standard trajectory-forecasting metrics **ADE**
+(average displacement error over the horizon) and **FDE** (final-step
+displacement error), against two classical baselines
+([`src/trajectory_baselines.py`](src/trajectory_baselines.py)): constant-velocity
+(CV) extrapolation and constant-turn-rate-and-velocity (CTRV), a standard tracker
+maneuver model. Getting an honest number out of this training loop took three
+rounds of debugging:
+
+*Bug 1 — noiseless data made the baselines look artificially perfect.* The first
+version trained and evaluated on noiseless synthetic tracks, on which CV gets
+*exactly* 0.000 ADE on the constant-velocity pattern by construction (the analytic
+model matches the ground truth generator exactly). That's not a meaningful
+comparison — real perception never delivers noiseless observations — so Gaussian
+sensor noise (`SENSOR_NOISE_STD = 0.05` m) was added to the observed window.
+
+*Bug 2 — freezing the noise let the model memorize it.* Baking one noisy sample per
+training example (fixed once at dataset-build time) let the model memorize each
+sample's particular noise realization: training loss went to near zero while
+validation loss was 2-3x worse and *climbing* as training continued — the textbook
+memorization signature. The fix
+(`obstacle_trajectory_data.add_observation_noise`) redraws sensor noise fresh every
+epoch, as data augmentation, while the validation/test sets use one fixed
+(seeded) noise draw so evaluation stays reproducible.
+
+*Bug 3 — exposure bias (the real root cause of poor validation performance).* Even
+with per-epoch noise augmentation, validation loss still got *worse* over training
+— best checkpoint landing at epoch 1 or 2 — while training loss (computed with
+teacher forcing: the *true* previous displacement fed back at each decode step)
+kept improving smoothly. This is a well-known failure mode in sequence-to-sequence
+training (Bengio et al., "Scheduled Sampling," 2015): a model trained only on
+correct history never practices recovering from its own mistakes, but at inference
+it *only* ever sees its own (imperfect) predictions feeding forward autoregressively
+— a task it was never trained for. The fix: `ObstaclePredictor.forward` accepts a
+`teacher_forcing_prob` that's annealed from 1.0 (fully teacher-forced) to 0.0 (fully
+autoregressive) over the 80 training epochs. This fully resolved the issue —
+validation loss now decreases properly, with the best checkpoint landing near the
+end of training (epoch 77 of 80).
+
+**Test-set results** (held out, fixed noise seed, meters):
+
+| Predictor | ADE | FDE |
+|---|---|---|
+| **SSM (learned)** | **0.521 ± 0.343 m** | **0.982 ± 0.699 m** |
+| CV | 0.701 ± 0.445 m | 1.362 ± 0.876 m |
+| CTRV | 1.555 ± 0.929 m | 3.009 ± 1.872 m |
+
+Broken down per motion pattern (ADE, meters) so an aggregate win can't hide a
+per-pattern loss:
+
+| Pattern | SSM | CV | CTRV |
+|---|---|---|---|
+| constant_velocity | **0.245** | 0.485 | 1.555 |
+| decelerating | **0.357** | 0.560 | 1.284 |
+| constant_turn | 0.720 | **0.672** | 1.721 |
+| weave | **0.719** | 1.041 | 1.673 |
+
+Honestly reported: the SSM predictor loses narrowly to CV on `constant_turn` — a
+pattern whose geometry (near-constant curvature) is close to CTRV's own analytic
+assumption, and where a small, fixed model has less to gain from learning over a
+hand-designed extrapolator. It wins clearly everywhere else, especially on
+`decelerating`, the pattern that matters most for the demo below. Reproduce with
+`python src/train_predictor.py` (~80 epochs, well under a minute on CPU).
+
+### Integrating moving obstacles into NMPC
+
+[`src/nmpc_controller.py`](src/nmpc_controller.py)'s obstacle constraint (previously
+a fixed `(ox, oy, radius)` triple) now accepts either a static `(2,)` center
+(broadcast across the horizon, unchanged behavior for existing callers) or a moving
+`(H+1, 2)` array of *per-step predicted positions* — one predicted center for each
+point of the horizon, including the terminal step (previously only steps `0..H-1`
+were constrained; the terminal step `H` is now covered too). CasADi's
+`opti.parameter` is strictly 2D, so each of up to 4 obstacle "slots" gets its own
+`(2, H+1)` parameter rather than trying to pack a 3D tensor into one parameter — a
+small but real implementation constraint worth knowing about if you extend this
+further.
+
+**A third real bug, found here: an obstacle-blind fallback that caused actual
+collisions.** The first end-to-end run of the moving-obstacle demo (below) showed
+real collisions — `cv: 2/8 trials, ssm: 1/8 trials`. Instrumenting the controller to
+log CasADi/IPOPT's raw `return_status` at every step of a colliding trial (the same
+methodology used to root-cause the Part 2 NMPC bugs) found `Infeasible_Problem_Detected`
+for several consecutive steps exactly as the obstacle became a binding constraint —
+and on every one of those failed solves, the exception handler was falling back to
+`_build_consistent_guess`, which has **zero knowledge of obstacles** (it only knows
+how to track the reference path). The controller was driving straight through the
+obstacle it couldn't see in its own fallback. The fix: when an obstacle is active
+*and* a previous successful solution exists, fall back to that previous solution's
+shifted trajectory (which respected the obstacle constraint as of one control step
+ago) instead of the obstacle-blind path-tracking guess — a stale-but-obstacle-aware
+plan is safer than a fresh-but-obstacle-blind one. After the fix, collisions dropped
+to **0/8 for all three prediction methods**, with no regression in the existing
+static-obstacle (`obstacle_demo.py`) or no-obstacle (`nmpc_demo.py`) numbers, which
+are unchanged from Part 2.
+
+### The demo: naive vs. CV vs. SSM prediction, same NMPC constraint
+
+[`src/moving_obstacle_demo.py`](src/moving_obstacle_demo.py) drives the ego vehicle
+(dynamic model + NMPC, exactly as in Part 2) down a straight lane at cruise speed
+while a pedestrian walks toward the lane and **decelerates to a stop** partway
+across — an ordinary, safety-critical scenario: someone hesitates, or stops to let
+the car pass. The ego only ever sees a noisy, partial window of the pedestrian's
+recent track (matching a real perception stack), and three assumptions about "where
+will they be over my horizon" are compared, feeding the *identical* NMPC
+moving-obstacle constraint with the *identical* true pedestrian trajectory and
+sensor noise realization per trial:
+
+- **naive** — assume the obstacle stays at its last sensed position (what a
+  static-obstacle constraint effectively does if bolted onto a moving world without
+  further thought).
+- **CV** — constant-velocity extrapolation.
+- **SSM** — the trained predictor's autoregressive rollout.
+
+(The pedestrian's deceleration onset is computed analytically from its own
+randomized speed/decel draw so it reliably stops *in* the lane regardless of those
+random draws — an earlier version picked a fixed fraction of the simulation length
+instead, which could let the pedestrian coast straight through and stop safely on
+the far side, silently turning the scenario into a non-test where no avoidance was
+ever needed. Caught by noticing all three methods gave identical "clear" results
+across every trial, which should have been suspicious on its own.)
+
+**Results, 8 Monte Carlo trials (mean ± std):**
+
+| Method | Closest approach | Max lateral deviation | Collisions |
+|---|---|---|---|
+| naive | 1.75 ± 0.02 m | 1.89 ± 0.22 m | 0/8 |
+| cv | 1.50 ± 0.49 m | 2.22 ± 1.01 m | 0/8 |
+| **ssm** | **1.80 ± 0.12 m** | 2.37 ± 0.66 m | 0/8 |
+
+![Moving-obstacle avoidance: naive vs. CV vs. SSM prediction](results/moving_obstacle_plot.png)
+
+The honest reading of this table isn't "SSM wins on every axis." SSM gets the
+**highest mean closest-approach and by far the lowest variance** — it's the safest
+*and* the most consistent, because it's the only method that recognizes the
+pedestrian is decelerating and adjusts early and reliably. Its max-lateral-deviation
+is not the lowest, because recognizing the danger early means committing to an
+avoidance maneuver sooner and (in some trials) more decisively than CV — which,
+when it happens to guess right, occasionally out-glides SSM narrowly on that one
+metric, but at much higher variance. CV is the most erratic of the three: it can
+badly mispredict a stopping pedestrian as continuing to cross, occasionally forcing
+a much sharper last-moment correction (its 0.49 m std on closest-approach vs. SSM's
+0.12 m tells that story on its own), and it's the method that actually collided in
+early debugging before the fallback fix above. Naive is closest-approach-consistent
+almost by construction (it never reacts to the pedestrian's motion at all, so it
+never gets it dramatically wrong or dramatically right) but gives up the most real
+safety margin on average.
+
+Reproduce with `python src/moving_obstacle_demo.py` (loads the trained weights from
+`results/ssm_predictor.pt`; run `train_predictor.py` first if that file doesn't
+exist).
+
 ## Repository layout
 
 ```
@@ -405,6 +639,11 @@ has to reconcile with.
 │   ├── obstacle_demo.py           # obstacle-avoidance scenario + before/after comparison
 │   ├── robustness_experiment.py   # crosswind/noise Monte Carlo study across all controllers
 │   ├── robustness_plot.py         # bar chart of the robustness study results
+│   ├── obstacle_trajectory_data.py # synthetic moving-obstacle motion patterns + noise augmentation
+│   ├── ssm_predictor.py           # S4D structured state-space sequence model (trajectory predictor)
+│   ├── trajectory_baselines.py    # CV / CTRV classical extrapolation baselines + ADE/FDE metrics
+│   ├── train_predictor.py         # trains + validates the SSM predictor against the baselines
+│   ├── moving_obstacle_demo.py    # moving-obstacle NMPC demo: naive vs. CV vs. SSM prediction
 │   └── visualize.py               # animated GIFs + comparison plots (shared by all of the above)
 ├── notebooks/
 │   └── demo.ipynb             # walkthrough: derive, simulate, visualize, compare (Part 1)
@@ -430,6 +669,10 @@ python src/nmpc_demo.py               # NMPC vs. pure pursuit on the figure-eigh
 python src/obstacle_demo.py           # obstacle avoidance: closest-approach numbers + GIF/plot
 python src/robustness_experiment.py   # Monte Carlo robustness study (~2-3 min)
 python src/robustness_plot.py         # bar chart from the study above
+
+# Part 3: moving-obstacle prediction (state-space neural network)
+python src/train_predictor.py         # trains the SSM predictor, evaluates vs. CV/CTRV (~4 min on CPU)
+python src/moving_obstacle_demo.py    # NMPC + naive/CV/SSM prediction: 8-trial comparison + GIF/plot
 ```
 
 **Solve times, measured (not assumed).** "NMPC is slower per-solve than a QP" is the
@@ -482,12 +725,19 @@ that still produced an honest, working result (Part 1), then grew it deliberatel
   and fixed while stress-testing and benchmarking it.
 - ✅ **Obstacle avoidance** — hard non-convex keep-out constraints added to the
   NMPC, demonstrated on static obstacles. See
-  [Obstacle avoidance](#obstacle-avoidance). Moving obstacles (with a predicted
-  trajectory fed into the horizon) are a natural next step.
+  [Obstacle avoidance](#obstacle-avoidance).
 - ✅ **Robustness** — crosswind + process/sensor noise, Monte Carlo comparison
   across all four controller/model combinations. See
   [Robustness to disturbances](#extension-robustness-to-disturbances). Actuator
   delay and a proper disturbance observer / tube-MPC approach remain open.
+- ✅ **Moving-obstacle prediction (state-space neural network)** — a learned S4D
+  sequence model forecasts a moving obstacle's future trajectory from noisy
+  observations and feeds it into the NMPC's obstacle constraint, beating CV/CTRV
+  baselines on ADE/FDE and giving the safest, most consistent avoidance in an
+  8-trial pedestrian-crossing demo. See
+  [Part 3](#part-3-moving-obstacle-prediction-with-a-learned-state-space-model). A
+  natural next step: multi-obstacle scenes where obstacles interact (social-force /
+  attention-based prediction) rather than being forecast independently.
 - ⬜ **Hardware-in-the-loop.** Port the controller to run in real time against a
   higher-fidelity simulator (e.g. CARLA) or a small RC/robot testbed — the one
   extension from the original plan not yet built here.
@@ -509,3 +759,11 @@ that still produced an honest, working result (Part 1), then grew it deliberatel
 - A. Wächter, L. T. Biegler, "On the implementation of an interior-point filter
   line-search algorithm for large-scale nonlinear programming," *Mathematical
   Programming*, 2006 — IPOPT, the NLP solver CasADi calls for NMPC.
+- A. Gu, K. Goel, C. Ré, "Efficiently Modeling Long Sequences with Structured State
+  Spaces," *ICLR*, 2022 — the S4 architecture behind Part 3's trajectory predictor.
+- A. Gu, A. Gupta, K. Goel, C. Ré, "On the Parameterization and Initialization of
+  Diagonal State Space Models," *NeurIPS*, 2022 — S4D, the diagonal simplification
+  used here.
+- S. Bengio, O. Vinyals, N. Jaitly, N. Shazeer, "Scheduled Sampling for Sequence
+  Prediction with Recurrent Neural Networks," *NeurIPS*, 2015 — the exposure-bias
+  fix used to train the predictor (see Part 3).

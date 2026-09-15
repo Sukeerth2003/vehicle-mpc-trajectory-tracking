@@ -177,6 +177,84 @@ def obstacle_avoidance_plot(path: np.ndarray, result_with: SimResult, result_wit
     plt.close(fig)
 
 
+def moving_obstacle_plot(path: np.ndarray, ped_traj: np.ndarray, results: dict,
+                          obstacle_radius: float, out_path: str):
+    """Static before/after figure for moving_obstacle_demo.py: the SAME true
+    pedestrian trajectory, three ego runs overlaid, one per obstacle-future
+    assumption (naive/CV/SSM). `results` maps method name -> the dict
+    returned by moving_obstacle_demo.run_scenario."""
+    colors = {"naive": "#c92a2a", "cv": "#e8590c", "ssm": "#2f6feb"}
+    labels = {"naive": "naive (static)", "cv": "constant-velocity", "ssm": "SSM (learned)"}
+
+    fig, ax = plt.subplots(figsize=(11, 5))
+    ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Lane centerline", zorder=1)
+    ax.plot(ped_traj[:, 0], ped_traj[:, 1], "-", color="#495057", linewidth=2, label="Pedestrian (true path)", zorder=2)
+    ax.add_patch(patches.Circle(ped_traj[-1], obstacle_radius, facecolor="#868e96", edgecolor="#343a40",
+                                 alpha=0.5, zorder=3, label="Pedestrian, final position"))
+
+    for method in ["naive", "cv", "ssm"]:
+        r = results[method]
+        tag = " (COLLISION)" if r["collision"] else ""
+        ax.plot(r["states"][:, 0], r["states"][:, 1], "-", color=colors[method], linewidth=2.2,
+                label=f"Ego, {labels[method]} prediction{tag}", zorder=4)
+
+    ax.set_xlim(path[:, 0].min() - 3, path[:, 0].max() + 3)
+    ax.set_ylim(-8, 3)
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_title("Moving-obstacle avoidance: same NMPC, same true pedestrian path,\n"
+                 "different assumptions about where the pedestrian will be")
+    ax.legend(fontsize=8.5, loc="upper left", bbox_to_anchor=(1.01, 1.0), borderaxespad=0)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def animate_moving_obstacle(path: np.ndarray, ped_traj: np.ndarray, result: dict,
+                             obstacle_radius: float, out_path: str, title: str = "",
+                             fps: int = 20, stride: int = 2):
+    """Animated GIF of one ego run (moving_obstacle_demo's `result` dict for
+    a single method) against the true, moving pedestrian."""
+    fig, ax = plt.subplots(figsize=(11, 5))
+    ax.plot(path[:, 0], path[:, 1], "--", color="#9aa5b1", linewidth=1.5, label="Lane centerline", zorder=1)
+    ax.set_xlim(path[:, 0].min() - 3, path[:, 0].max() + 3)
+    ax.set_ylim(-8, 3)
+    ax.set_xlabel("X [m]"); ax.set_ylabel("Y [m]")
+    ax.set_title(title or "Moving-obstacle avoidance")
+
+    driven_line, = ax.plot([], [], "-", color="#2f6feb", linewidth=2, label="Ego driven path", zorder=2)
+    ped_patch_holder = {"patch": None}
+    car_patch_holder = {"patch": None}
+    ax.legend(loc="upper right", fontsize=8)
+
+    states = result["states"]
+    n_frames = min(len(states), len(ped_traj))
+    frames = list(range(0, n_frames, stride))
+
+    def update(frame_idx):
+        i = frames[frame_idx]
+        state = states[i]
+        driven_line.set_data(states[:i + 1, 0], states[:i + 1, 1])
+
+        if car_patch_holder["patch"] is not None:
+            car_patch_holder["patch"].remove()
+        car_patch_holder["patch"] = _draw_car(ax, state[0], state[1], state[2], color="#2f6feb")
+
+        if ped_patch_holder["patch"] is not None:
+            ped_patch_holder["patch"].remove()
+        ped_patch_holder["patch"] = ax.add_patch(
+            patches.Circle(ped_traj[i], obstacle_radius, facecolor="#868e96", edgecolor="#343a40",
+                            alpha=0.7, zorder=3))
+
+        speed = float(np.hypot(state[3], state[4]))
+        ax.set_title(f"{title}  |  t = {i * 0.1:.1f}s  v = {speed:.1f} m/s")
+        return driven_line,
+
+    anim = FuncAnimation(fig, update, frames=len(frames), interval=1000 / fps, blit=False)
+    anim.save(out_path, writer=PillowWriter(fps=fps))
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     import os
 
