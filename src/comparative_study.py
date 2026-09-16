@@ -184,6 +184,7 @@ def run_study(n_trials: int = 4, sim_steps: int = 110, verbose: bool = True) -> 
 
     results = {}
     first_trial = {}
+    all_trials = {}
     for scenario in SCENARIOS:
         results[scenario] = {}
         for controller_name in CONTROLLERS:
@@ -198,6 +199,13 @@ def run_study(n_trials: int = 4, sim_steps: int = 110, verbose: bool = True) -> 
                     r = run_scenario(controller_name, method, models, ped_traj, sim_steps, seed=2000 + seed)
                     for k in metrics:
                         metrics[k].append(r[k])
+                    # Every trial's (ped_traj, states) is kept, not just trial 0 --
+                    # different methods on the SAME true trajectory can diverge
+                    # into collision on different trial indices (a method's own
+                    # prediction changes the ego's chosen action, not just the
+                    # scenario), so a single fixed trial index isn't guaranteed to
+                    # be representative for every method. See render_highwayenv.py.
+                    all_trials[(scenario, controller_name, method, trial)] = (ped_traj, r)
                     if trial == 0:
                         first_trial[(scenario, controller_name, method)] = (ped_traj, r)
                     if verbose:
@@ -213,14 +221,22 @@ def run_study(n_trials: int = 4, sim_steps: int = 110, verbose: bool = True) -> 
                     "max_solve_time_ms": float(np.max(metrics["max_solve_time_ms"])),
                     "n_collisions": int(sum(metrics["collision"])),
                     "n_trials": n_trials,
+                    # Raw per-trial values -- kept explicitly so plots can show the
+                    # actual spread (e.g. individual trial dots) instead of only a
+                    # mean+std bar, which can visually mislead: a mean comfortably
+                    # above the collision threshold can still hide one trial that
+                    # dipped below it (see the README's honest note on this).
+                    "min_dist_trials": [float(v) for v in metrics["min_dist"]],
+                    "max_lateral_deviation_trials": [float(v) for v in metrics["max_lateral_deviation"]],
+                    "collision_trials": [bool(v) for v in metrics["collision"]],
                 }
-    return results, first_trial
+    return results, first_trial, all_trials
 
 
 if __name__ == "__main__":
     os.makedirs("../results", exist_ok=True)
     t0 = time.time()
-    results, first_trial = run_study(n_trials=4, sim_steps=110, verbose=True)
+    results, first_trial, all_trials = run_study(n_trials=4, sim_steps=110, verbose=True)
     print(f"\nTotal wall time: {time.time() - t0:.1f}s")
 
     print("\n=== Summary: closest approach (m), mean +/- std, collisions/trials ===")
@@ -239,12 +255,20 @@ if __name__ == "__main__":
     with open("../results/comparative_study.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    # Save first-trial trajectories for plotting (only picklable numeric data)
+    # Save EVERY trial's trajectories for plotting (only picklable numeric
+    # data) -- not just trial 0. Different methods diverge into collision on
+    # DIFFERENT trial indices even given the identical true trajectory,
+    # because each method's own prediction changes which action the
+    # controller picks, which changes the realized ego path. So a single
+    # fixed trial index is not guaranteed to be representative for every
+    # method; the multi-method highway-env renderer needs access to all of
+    # them to pick an illustrative trial per scenario/controller pair.
     plot_data = {}
-    for (scenario, controller_name, method), (ped_traj, r) in first_trial.items():
-        key = f"{scenario}|{controller_name}|{method}"
+    for (scenario, controller_name, method, trial), (ped_traj, r) in all_trials.items():
+        key = f"{scenario}|{controller_name}|{method}|{trial}"
         plot_data[key] = {"ped_traj": ped_traj.tolist(), "states": r["states"].tolist()}
     with open("../results/comparative_study_trials.json", "w") as f:
         json.dump(plot_data, f)
 
-    print("\nSaved ../results/comparative_study.json and ../results/comparative_study_trials.json")
+    print(f"\nSaved ../results/comparative_study.json and "
+          f"../results/comparative_study_trials.json ({len(plot_data)} trial records)")

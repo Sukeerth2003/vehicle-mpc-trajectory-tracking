@@ -6,50 +6,140 @@
         "min_dist_std": 0.5667531515555592,
         "max_lateral_deviation_mean": 1.3612907925917332,
         "max_lateral_deviation_std": 0.3348777149394101,
-        "mean_solve_time_ms": 81.83611500683955,
-        "max_solve_time_ms": 175.5984029996398,
+        "mean_solve_time_ms": 84.28716008863701,
+        "max_solve_time_ms": 183.14882399999988,
         "n_collisions": 1,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5046156365422199,
+          1.5096222690298517,
+          1.5755115895191845,
+          0.2226518541533086
+        ],
+        "max_lateral_deviation_trials": [
+          1.4124926467661303,
+          1.4489454533131114,
+          1.7548024883616395,
+          0.8289225819260514
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          true
+        ]
       },
       "cv": {
         "min_dist_mean": 1.558772290611755,
         "min_dist_std": 0.05890903151636378,
         "max_lateral_deviation_mean": 1.6327677843111044,
         "max_lateral_deviation_std": 0.29319358912830507,
-        "mean_solve_time_ms": 82.67224130002185,
-        "max_solve_time_ms": 169.7591909996845,
+        "mean_solve_time_ms": 83.83682536590956,
+        "max_solve_time_ms": 182.07178099999055,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5204246755889148,
+          1.5911740594122554,
+          1.637054593065052,
+          1.4864358343807973
+        ],
+        "max_lateral_deviation_trials": [
+          2.096517782344889,
+          1.530866532247077,
+          1.6145313633928349,
+          1.2891554592596162
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.1770258941138954,
         "min_dist_std": 0.5698306387500714,
         "max_lateral_deviation_mean": 1.1109442373591643,
         "max_lateral_deviation_std": 0.5746072256776263,
-        "mean_solve_time_ms": 82.36991508866925,
-        "max_solve_time_ms": 177.85139699935826,
+        "mean_solve_time_ms": 84.3349130795443,
+        "max_solve_time_ms": 186.54813700004524,
         "n_collisions": 1,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.4300010552416862,
+          0.19326655050288893,
+          1.5460365803754825,
+          1.5387993903355235
+        ],
+        "max_lateral_deviation_trials": [
+          1.3045863013206855,
+          0.1471729943015614,
+          1.6659972398594958,
+          1.3260204139549148
+        ],
+        "collision_trials": [
+          false,
+          true,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.5411659808055391,
         "min_dist_std": 0.04252325753552658,
         "max_lateral_deviation_mean": 1.6855181784532007,
         "max_lateral_deviation_std": 0.25658647984635263,
-        "mean_solve_time_ms": 83.08447532956714,
-        "max_solve_time_ms": 166.44185099994502,
+        "mean_solve_time_ms": 86.14645811136137,
+        "max_solve_time_ms": 182.08714700006112,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5156725546640504,
+          1.496435973292618,
+          1.5437465121326297,
+          1.6088088831328584
+        ],
+        "max_lateral_deviation_trials": [
+          1.4477043007101884,
+          2.1167876403917965,
+          1.5565013341583454,
+          1.6210794385524725
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 0.8146716015649883,
         "min_dist_std": 0.6902326315774249,
         "max_lateral_deviation_mean": 0.9776570611504882,
         "max_lateral_deviation_std": 0.3507998837856701,
-        "mean_solve_time_ms": 86.90009794090449,
-        "max_solve_time_ms": 178.3754729995053,
+        "mean_solve_time_ms": 91.09251836818079,
+        "max_solve_time_ms": 181.16081499999837,
         "n_collisions": 2,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.460461620578798,
+          0.032934295198820206,
+          0.2237501301107443,
+          1.5415403603715907
+        ],
+        "max_lateral_deviation_trials": [
+          1.336041803798789,
+          0.5822568138338551,
+          0.6746246288093253,
+          1.3177049981599838
+        ],
+        "collision_trials": [
+          false,
+          true,
+          true,
+          false
+        ]
       }
     },
     "dynamic_nmpc": {
@@ -58,50 +148,140 @@
         "min_dist_std": 0.034748667503118655,
         "max_lateral_deviation_mean": 1.9822432478565213,
         "max_lateral_deviation_std": 0.14361411319584572,
-        "mean_solve_time_ms": 26.840895293178782,
-        "max_solve_time_ms": 492.56642399996053,
+        "mean_solve_time_ms": 35.06194305227087,
+        "max_solve_time_ms": 2961.712497999997,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.782711018158655,
+          1.7539562398136763,
+          1.7534256701643318,
+          1.687925185046933
+        ],
+        "max_lateral_deviation_trials": [
+          1.8464187353022912,
+          1.864956448534345,
+          2.0132402976140558,
+          2.2043575099753934
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "cv": {
         "min_dist_mean": 1.8410370034264623,
         "min_dist_std": 0.24502852257949154,
         "max_lateral_deviation_mean": 3.0099434166636767,
         "max_lateral_deviation_std": 0.9313119079960068,
-        "mean_solve_time_ms": 33.0611375795632,
-        "max_solve_time_ms": 809.9378639999486,
+        "mean_solve_time_ms": 33.87231186136587,
+        "max_solve_time_ms": 828.8694420000411,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5211057667000258,
+          1.7531271250097336,
+          1.8918161607288948,
+          2.198098961267195
+        ],
+        "max_lateral_deviation_trials": [
+          2.1097277373266707,
+          4.540643763928428,
+          2.9367550015010213,
+          2.4526471638985865
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.7511888711186063,
         "min_dist_std": 0.021782288605514875,
         "max_lateral_deviation_mean": 1.8429595443432198,
         "max_lateral_deviation_std": 0.17748142032344763,
-        "mean_solve_time_ms": 27.438846474985276,
-        "max_solve_time_ms": 289.64816099960444,
+        "mean_solve_time_ms": 28.17903452954676,
+        "max_solve_time_ms": 302.24683400001595,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.7853118871964675,
+          1.7255095108750909,
+          1.7513496769349954,
+          1.742584409467871
+        ],
+        "max_lateral_deviation_trials": [
+          1.8261796629357219,
+          1.8592018362236646,
+          2.0936810265282277,
+          1.5927756516852658
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.7360004297888743,
         "min_dist_std": 0.07273630505381194,
         "max_lateral_deviation_mean": 1.9392987525327192,
         "max_lateral_deviation_std": 0.2013172944244668,
-        "mean_solve_time_ms": 27.55277886138339,
-        "max_solve_time_ms": 279.5525990004535,
+        "mean_solve_time_ms": 28.30772346363517,
+        "max_solve_time_ms": 257.48547299997426,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.83385188937072,
+          1.7665000803188902,
+          1.7066109332427866,
+          1.6370388162231004
+        ],
+        "max_lateral_deviation_trials": [
+          1.9387818049436656,
+          2.0860654689976994,
+          2.121006537107873,
+          1.6113411990816398
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 1.7535037200508878,
         "min_dist_std": 0.009410176775554939,
         "max_lateral_deviation_mean": 1.8879206680609386,
         "max_lateral_deviation_std": 0.16034783224264346,
-        "mean_solve_time_ms": 27.422856940963605,
-        "max_solve_time_ms": 288.3939500006818,
+        "mean_solve_time_ms": 29.523005079550757,
+        "max_solve_time_ms": 326.0489790000065,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.766747679443121,
+          1.743424180547679,
+          1.7459132094234922,
+          1.7579298107892594
+        ],
+        "max_lateral_deviation_trials": [
+          1.9532071994569036,
+          2.0158709975561404,
+          1.9695462403426234,
+          1.6130582348880873
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       }
     }
   },
@@ -112,50 +292,140 @@
         "min_dist_std": 0.39863388224963964,
         "max_lateral_deviation_mean": 2.993575934455137,
         "max_lateral_deviation_std": 1.7746180519940442,
-        "mean_solve_time_ms": 82.02582454544591,
-        "max_solve_time_ms": 196.74439800019172,
+        "mean_solve_time_ms": 86.2932524068149,
+        "max_solve_time_ms": 196.78533100000095,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          0.8679555028786221,
+          1.9466383150267,
+          1.2801161259707559,
+          1.1252527838994466
+        ],
+        "max_lateral_deviation_trials": [
+          2.7282183646155143,
+          0.4937946004930512,
+          5.484016991213077,
+          3.268273781498906
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "cv": {
         "min_dist_mean": 1.705651864787162,
         "min_dist_std": 0.10535093463476722,
         "max_lateral_deviation_mean": 0.3949851478361986,
         "max_lateral_deviation_std": 0.08246425759772145,
-        "mean_solve_time_ms": 80.15456183638682,
-        "max_solve_time_ms": 174.51052100022935,
+        "mean_solve_time_ms": 84.04023598181942,
+        "max_solve_time_ms": 174.06318999996984,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.535200638496678,
+          1.80575852608416,
+          1.7031005828867478,
+          1.7785477116810624
+        ],
+        "max_lateral_deviation_trials": [
+          0.30637080216135587,
+          0.31908931272322816,
+          0.482575745997798,
+          0.4719047304624125
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.1422630658864577,
         "min_dist_std": 0.5935886583571451,
         "max_lateral_deviation_mean": 2.49991406286694,
         "max_lateral_deviation_std": 1.2917462769876609,
-        "mean_solve_time_ms": 81.56538572956873,
-        "max_solve_time_ms": 173.3779490004963,
+        "mean_solve_time_ms": 84.14124436818172,
+        "max_solve_time_ms": 184.80181900008574,
         "n_collisions": 1,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          0.71376340248575,
+          0.5417220748397317,
+          1.2471090080149887,
+          2.0664577782053604
+        ],
+        "max_lateral_deviation_trials": [
+          2.3551890177301815,
+          2.4168834975769014,
+          4.43322283048909,
+          0.7943609056715876
+        ],
+        "collision_trials": [
+          false,
+          true,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.6666959995605035,
         "min_dist_std": 0.05114128526187086,
         "max_lateral_deviation_mean": 0.356219469766459,
         "max_lateral_deviation_std": 0.08253242074655,
-        "mean_solve_time_ms": 80.54620974998505,
-        "max_solve_time_ms": 168.19992799992178,
+        "mean_solve_time_ms": 84.05909325227299,
+        "max_solve_time_ms": 183.6410570000453,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5916658238951797,
+          1.7270510982963048,
+          1.6972905809125585,
+          1.650776495137971
+        ],
+        "max_lateral_deviation_trials": [
+          0.3428753162648661,
+          0.2523131318326741,
+          0.4833938567287304,
+          0.3462955742395655
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 1.740499471243608,
         "min_dist_std": 0.047804729348840634,
         "max_lateral_deviation_mean": 0.4297621523733184,
         "max_lateral_deviation_std": 0.125685326783206,
-        "mean_solve_time_ms": 86.48021530003172,
-        "max_solve_time_ms": 165.97827399982634,
+        "mean_solve_time_ms": 92.15492809545161,
+        "max_solve_time_ms": 221.30200300000524,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.6833263900158257,
+          1.704008202897416,
+          1.7961148549918293,
+          1.778548437069361
+        ],
+        "max_lateral_deviation_trials": [
+          0.4156181886125735,
+          0.2431424295562898,
+          0.5934180183535357,
+          0.46686997297087446
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       }
     },
     "dynamic_nmpc": {
@@ -164,50 +434,140 @@
         "min_dist_std": 0.07662671839682757,
         "max_lateral_deviation_mean": 5.340844961682946,
         "max_lateral_deviation_std": 0.8365134742858199,
-        "mean_solve_time_ms": 38.247104322726955,
-        "max_solve_time_ms": 1729.218426999978,
+        "mean_solve_time_ms": 38.04465568636653,
+        "max_solve_time_ms": 1691.4144739999983,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.435810103351547,
+          1.3918372135362826,
+          1.2361803798543378,
+          1.3101612289024849
+        ],
+        "max_lateral_deviation_trials": [
+          6.2629948268109485,
+          5.926991006737141,
+          4.103161416163131,
+          5.070232597020568
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "cv": {
         "min_dist_mean": 1.8374840315373804,
         "min_dist_std": 0.05697433998893946,
         "max_lateral_deviation_mean": 0.553220113764739,
         "max_lateral_deviation_std": 0.1970084540828759,
-        "mean_solve_time_ms": 25.745029218187067,
-        "max_solve_time_ms": 318.0345619994114,
+        "mean_solve_time_ms": 26.83806490909278,
+        "max_solve_time_ms": 325.38785899998857,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.7804742859692406,
+          1.8211738869588747,
+          1.8159191253132234,
+          1.9323688279081825
+        ],
+        "max_lateral_deviation_trials": [
+          0.4811318822224308,
+          0.26365997565183485,
+          0.7542032367154266,
+          0.7138853604692637
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.8480260212842792,
         "min_dist_std": 0.7462371131886635,
         "max_lateral_deviation_mean": 2.7480630015918335,
         "max_lateral_deviation_std": 1.6572829724831855,
-        "mean_solve_time_ms": 40.13519836136601,
-        "max_solve_time_ms": 1655.9824449996086,
+        "mean_solve_time_ms": 40.745609636369615,
+        "max_solve_time_ms": 1810.232553999981,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.0562342747607867,
+          2.6087277889897886,
+          1.1489401011476017,
+          2.5782019202389397
+        ],
+        "max_lateral_deviation_trials": [
+          3.728437191631897,
+          1.0621677361858555,
+          4.9628239435743,
+          1.2388231349752814
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.8703219049575721,
         "min_dist_std": 0.0837416266673726,
         "max_lateral_deviation_mean": 0.5181216401443101,
         "max_lateral_deviation_std": 0.18046218533010042,
-        "mean_solve_time_ms": 26.4840403841018,
-        "max_solve_time_ms": 269.39287400000467,
+        "mean_solve_time_ms": 30.553462686365986,
+        "max_solve_time_ms": 295.76876999999513,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.8196318565498004,
+          1.777784471312983,
+          1.9996458127958134,
+          1.884225479171691
+        ],
+        "max_lateral_deviation_trials": [
+          0.5602711201421565,
+          0.2226997472058112,
+          0.7123680169539317,
+          0.5771476762753408
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 2.0565805627281684,
         "min_dist_std": 0.09505304499167902,
         "max_lateral_deviation_mean": 0.667473927505215,
         "max_lateral_deviation_std": 0.1762959942706021,
-        "mean_solve_time_ms": 27.032501249996955,
-        "max_solve_time_ms": 259.30775300003006,
+        "mean_solve_time_ms": 31.893376413634915,
+        "max_solve_time_ms": 275.5020439999498,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.9744373275834297,
+          1.9725388242816186,
+          2.2049458533697863,
+          2.0744002456778383
+        ],
+        "max_lateral_deviation_trials": [
+          0.6736816215343697,
+          0.41076408473154125,
+          0.9089294946447213,
+          0.6765205091102277
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       }
     }
   },
@@ -218,50 +578,140 @@
         "min_dist_std": 0.031717468658385324,
         "max_lateral_deviation_mean": 1.2804456057599654,
         "max_lateral_deviation_std": 0.09455072514394347,
-        "mean_solve_time_ms": 80.92667558863178,
-        "max_solve_time_ms": 172.81245999947714,
+        "mean_solve_time_ms": 87.15317348181668,
+        "max_solve_time_ms": 203.97860299999593,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5415123396861008,
+          1.4731903844408116,
+          1.5249596695430923,
+          1.5576931837278278
+        ],
+        "max_lateral_deviation_trials": [
+          1.2973568406916742,
+          1.1980172757798726,
+          1.1980245236203788,
+          1.4283837829479353
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "cv": {
         "min_dist_mean": 1.4904348831328948,
         "min_dist_std": 0.11418871677416227,
         "max_lateral_deviation_mean": 1.4471707164257213,
         "max_lateral_deviation_std": 0.18723226267400497,
-        "mean_solve_time_ms": 80.81277146365292,
-        "max_solve_time_ms": 168.3620849998988,
+        "mean_solve_time_ms": 85.55791424545409,
+        "max_solve_time_ms": 205.49233100018682,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5229225841502372,
+          1.5063170853826915,
+          1.6238550286843267,
+          1.3086448343143238
+        ],
+        "max_lateral_deviation_trials": [
+          1.301951594138918,
+          1.7574122152864387,
+          1.2965819721237126,
+          1.4327370841538154
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.5202215488558772,
         "min_dist_std": 0.05280183718099456,
         "max_lateral_deviation_mean": 1.3072549231796242,
         "max_lateral_deviation_std": 0.06233182717439748,
-        "mean_solve_time_ms": 81.94094999091084,
-        "max_solve_time_ms": 180.57128000054945,
+        "mean_solve_time_ms": 83.5395245818187,
+        "max_solve_time_ms": 183.3409109999593,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.4716285085707805,
+          1.5407459010580171,
+          1.5974052310409077,
+          1.4711065547538036
+        ],
+        "max_lateral_deviation_trials": [
+          1.2368156784901034,
+          1.2629678391746046,
+          1.3965314739472834,
+          1.3327047011065052
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.405288195788177,
         "min_dist_std": 0.17525436982989326,
         "max_lateral_deviation_mean": 1.4056311189482078,
         "max_lateral_deviation_std": 0.24771375852577873,
-        "mean_solve_time_ms": 82.3239006545505,
-        "max_solve_time_ms": 168.43940900071175,
+        "mean_solve_time_ms": 85.05247371137133,
+        "max_solve_time_ms": 186.7240799999763,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.5724392155782223,
+          1.2443929058695558,
+          1.5879156157906478,
+          1.2164050459142832
+        ],
+        "max_lateral_deviation_trials": [
+          1.5838923915061422,
+          1.005532593290798,
+          1.636937929497256,
+          1.396161561498635
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 1.5322338825219064,
         "min_dist_std": 0.06785918411177028,
         "max_lateral_deviation_mean": 1.41318364739262,
         "max_lateral_deviation_std": 0.2574649025255957,
-        "mean_solve_time_ms": 89.71882175909204,
-        "max_solve_time_ms": 185.34652499965887,
+        "mean_solve_time_ms": 90.76760967954814,
+        "max_solve_time_ms": 216.63549599998078,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.6251590707500745,
+          1.4352084153649467,
+          1.547738341838061,
+          1.5208297021345436
+        ],
+        "max_lateral_deviation_trials": [
+          1.392723591057178,
+          1.1650436392746268,
+          1.2584442106156943,
+          1.8365231486229807
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       }
     },
     "dynamic_nmpc": {
@@ -270,50 +720,140 @@
         "min_dist_std": 0.03692724755288515,
         "max_lateral_deviation_mean": 1.6986762200017547,
         "max_lateral_deviation_std": 0.043149205267924956,
-        "mean_solve_time_ms": 26.32979747272657,
-        "max_solve_time_ms": 258.2028380002157,
+        "mean_solve_time_ms": 26.929770474998804,
+        "max_solve_time_ms": 261.2246149999464,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.8060721495205507,
+          1.8325936011027248,
+          1.8382776928860844,
+          1.7451202042619716
+        ],
+        "max_lateral_deviation_trials": [
+          1.7061396456401645,
+          1.7209790674754646,
+          1.6269983635070164,
+          1.740587803384373
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "cv": {
         "min_dist_mean": 1.8484744272093503,
         "min_dist_std": 0.19725979326751203,
         "max_lateral_deviation_mean": 2.6846456882402965,
         "max_lateral_deviation_std": 0.2438361897096609,
-        "mean_solve_time_ms": 28.871478604543718,
-        "max_solve_time_ms": 491.77170299935824,
+        "mean_solve_time_ms": 29.757583504543952,
+        "max_solve_time_ms": 511.9534970001496,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          2.142631911475404,
+          1.601019718239838,
+          1.7668449518751963,
+          1.8834011272469622
+        ],
+        "max_lateral_deviation_trials": [
+          2.5555844990945507,
+          3.0557457587973933,
+          2.3990648810480155,
+          2.728187614021226
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ctrv": {
         "min_dist_mean": 1.7629654090479385,
         "min_dist_std": 0.016247401511026795,
         "max_lateral_deviation_mean": 1.6706420172479475,
         "max_lateral_deviation_std": 0.04016651869896645,
-        "mean_solve_time_ms": 26.031772545463188,
-        "max_solve_time_ms": 265.1334560005125,
+        "mean_solve_time_ms": 26.623166043177868,
+        "max_solve_time_ms": 275.6398760000138,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.7489242629182156,
+          1.77312385304328,
+          1.7842461857331149,
+          1.7455673344971443
+        ],
+        "max_lateral_deviation_trials": [
+          1.6509148526986153,
+          1.6405408364401575,
+          1.6513028127114093,
+          1.7398095671416074
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_uni": {
         "min_dist_mean": 1.9138931820041882,
         "min_dist_std": 0.06581379782515948,
         "max_lateral_deviation_mean": 2.409510949237152,
         "max_lateral_deviation_std": 0.7261743587778647,
-        "mean_solve_time_ms": 27.947890038659686,
-        "max_solve_time_ms": 255.89522500013118,
+        "mean_solve_time_ms": 29.59813283181709,
+        "max_solve_time_ms": 265.98072799993133,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          1.9208365565054626,
+          1.9522712644786218,
+          1.805273977955154,
+          1.9771909290775145
+        ],
+        "max_lateral_deviation_trials": [
+          2.0213186332277875,
+          2.2441020861046264,
+          1.7434366005472963,
+          3.629186477068898
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       },
       "ssm_mm": {
         "min_dist_mean": 1.922481782317539,
         "min_dist_std": 0.08764136707273112,
         "max_lateral_deviation_mean": 2.1040599813357073,
         "max_lateral_deviation_std": 0.24333787914253643,
-        "mean_solve_time_ms": 27.468580049997563,
-        "max_solve_time_ms": 255.09866599986708,
+        "mean_solve_time_ms": 31.357604038638247,
+        "max_solve_time_ms": 269.88217500002065,
         "n_collisions": 0,
-        "n_trials": 4
+        "n_trials": 4,
+        "min_dist_trials": [
+          2.0218900821089094,
+          1.7957173697687225,
+          1.983056704693108,
+          1.8892629726994163
+        ],
+        "max_lateral_deviation_trials": [
+          2.0989745833352993,
+          1.8440687784049996,
+          1.9776589021700717,
+          2.4955376614324587
+        ],
+        "collision_trials": [
+          false,
+          false,
+          false,
+          false
+        ]
       }
     }
   }

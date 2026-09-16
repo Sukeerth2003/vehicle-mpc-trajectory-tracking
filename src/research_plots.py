@@ -45,10 +45,22 @@ def load_results(path="../results/comparative_study.json"):
 def plot_ablation_bars(results: dict, out_path: str):
     """One subplot per scenario: grouped bars (method x controller) of mean
     closest approach with std error bars, and a red dashed line at the
-    obstacle's physical radius (below it = a collision by definition)."""
+    obstacle's physical radius (below it = a collision by definition).
+
+    A mean+std bar alone is misleading here: a bar (and even its error bar)
+    can sit comfortably above the red threshold line while one individual
+    trial underneath that mean still dipped below the threshold and counted
+    as a collision -- the mean just averages it out. So every individual
+    trial's closest-approach value is overlaid as a jittered scatter point
+    on top of its bar: a small gray dot for a safe trial, a red X for a
+    trial that actually collided. That red X is the ground truth for
+    whether a cell collided, not the bar height -- if you see a red X below
+    the dashed line under a bar that itself looks tall, that is a real
+    per-trial collision the mean is hiding, not a plotting bug."""
     fig, axes = plt.subplots(1, len(SCENARIOS), figsize=(15, 5), sharey=True)
     x = np.arange(len(METHODS))
     width = 0.35
+    rng = np.random.default_rng(0)
 
     for ax, scenario in zip(axes, SCENARIOS):
         for i, controller in enumerate(CONTROLLERS):
@@ -58,11 +70,28 @@ def plot_ablation_bars(results: dict, out_path: str):
             offset = (i - 0.5) * width
             bars = ax.bar(x + offset, means, width, yerr=stds, capsize=3,
                            label=CONTROLLER_LABELS[controller], color=CONTROLLER_COLORS[controller],
-                           edgecolor="white", linewidth=0.6)
-            for b, c in zip(bars, n_coll):
-                if c > 0:
-                    ax.annotate(f"{c} coll.", (b.get_x() + b.get_width() / 2, b.get_height() + stds[bars.index(b)] + 0.05),
-                                ha="center", fontsize=7.5, color="#c0392b", fontweight="bold")
+                           edgecolor="white", linewidth=0.6, alpha=0.55, zorder=1)
+            for j, m in enumerate(METHODS):
+                cell = results[scenario][controller][m]
+                trials = cell.get("min_dist_trials")
+                coll_flags = cell.get("collision_trials")
+                if not trials:
+                    continue
+                xc = x[j] + offset
+                jitter = rng.uniform(-width * 0.28, width * 0.28, size=len(trials))
+                safe = [t for t, c in zip(trials, coll_flags) if not c]
+                safe_x = [xc + jx for jx, c in zip(jitter, coll_flags) if not c]
+                hit = [t for t, c in zip(trials, coll_flags) if c]
+                hit_x = [xc + jx for jx, c in zip(jitter, coll_flags) if c]
+                if safe:
+                    ax.scatter(safe_x, safe, s=16, color="#2c2c2c", alpha=0.75, zorder=3,
+                                edgecolor="white", linewidth=0.4)
+                if hit:
+                    ax.scatter(hit_x, hit, marker="x", s=42, color="#c0392b", linewidth=1.8, zorder=4)
+                if n_coll[j] > 0:
+                    top = max(means[j] + stds[j], max(trials)) + 0.06
+                    ax.annotate(f"{n_coll[j]}/{cell['n_trials']} coll.", (xc, top),
+                                ha="center", fontsize=7, color="#c0392b", fontweight="bold")
         ax.axhline(OBSTACLE_RADIUS, color="#c0392b", linestyle="--", linewidth=1, alpha=0.7)
         ax.set_xticks(x)
         ax.set_xticklabels([METHOD_LABELS[m] for m in METHODS], fontsize=8.5)
@@ -70,11 +99,21 @@ def plot_ablation_bars(results: dict, out_path: str):
         ax.set_ylim(bottom=0)
         ax.grid(axis="y", linestyle=":", alpha=0.4)
 
-    axes[0].set_ylabel("Closest approach, mean ± std (m)")
+    axes[0].set_ylabel("Closest approach (m) -- bar = mean ± std, dots = individual trials")
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.04), frameon=False)
-    fig.suptitle("Full ablation matrix: controller x prediction method x scenario", y=1.10)
-    fig.text(0.5, -0.02, "Dashed red line = obstacle radius (0.6 m); below it counts as a collision.",
+    from matplotlib.lines import Line2D
+    handles = handles + [
+        Line2D([0], [0], marker="o", color="none", markerfacecolor="#2c2c2c", markeredgecolor="white",
+               markersize=6, label="Safe trial"),
+        Line2D([0], [0], marker="x", color="#c0392b", markersize=7, linewidth=0, markeredgewidth=1.8,
+               label="Collided trial"),
+    ]
+    labels = labels + ["Safe trial", "Collided trial"]
+    fig.legend(handles, labels, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 1.08), frameon=False)
+    fig.suptitle("Full ablation matrix: controller x prediction method x scenario", y=1.14)
+    fig.text(0.5, -0.02,
+              "Dashed red line = obstacle radius (0.6 m). Collision is a per-trial event (red X below the "
+              "line), not a per-mean one -- a bar can sit above the line while one of its trials still collided.",
               ha="center", fontsize=8.5, style="italic", color="#555555")
     fig.tight_layout()
     fig.savefig(out_path, dpi=160, bbox_inches="tight")

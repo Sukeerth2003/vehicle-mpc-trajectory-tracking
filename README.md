@@ -1,8 +1,8 @@
-# Vehicle Trajectory Tracking with State-Space Modeling and MPC
+# Selective State-Space Prediction and Model Predictive Control for Safe Autonomous Driving
 
-A from-scratch, incrementally-built research project on **Model Predictive Control
-(MPC)** for autonomous vehicle trajectory tracking, in five parts of increasing
-fidelity and scope:
+A from-scratch, incrementally-built research project on **trajectory prediction under
+uncertainty and Model Predictive Control (MPC)** for autonomous vehicle obstacle
+avoidance, in five parts of increasing fidelity and scope:
 
 1. A **kinematic bicycle model** controlled by **Linear Time-Varying MPC** (a convex
    QP, `cvxpy` + `OSQP`), benchmarked against classical **pure pursuit**.
@@ -193,6 +193,34 @@ the methodology):
 
 ![Full ablation matrix](results/ablation_bars.png)
 
+*How to read this chart*: the bar is the mean ± std over 4 trials, but **collision is
+a per-trial event, not a per-mean one** — every individual trial's closest-approach
+value is overlaid as a dot (safe) or a red X (collided), so a cell where the bar sits
+above the dashed 0.6 m threshold can still show a red X below it if one of its trials
+collided even though the average didn't (kinematic + LTV-MPC + multimodal SSM on
+Scenario A is exactly this case: mean 0.81 m, comfortably above the line, but 2 of its
+4 trials — 0.03 m and 0.22 m — collided). An earlier version of this figure only
+plotted the mean+std bar with a "N coll." text annotation, which could look
+contradictory (a tall bar next to a "collided" label); the per-trial dots make the
+actual, ground-truth spread visible instead of hiding it behind an average.
+
+![Multi-method 2D simulator comparison: all five prediction methods, one synced panel each, replayed against the identical true pedestrian trajectory (kinematic + LTV-MPC, the collision-prone controller, Scenario A, trial 1)](results/highwayenv_stack_moving_stop_kinematic.gif)
+
+The clip above replays this same collision case, once per prediction method, as five
+synced panels stacked in one figure: all five control identical kinematic + LTV-MPC
+egos against the exact same true pedestrian trajectory (Scenario A, trial 1), so their
+paths can be compared directly instead of stitched together from separate clips.
+CTRV and multimodal SSM (labeled COLLIDED in red) stop short right at the pedestrian;
+naive, CV, and unimodal SSM pass safely. An earlier version of this figure drew all
+five egos together in one shared scene instead of stacked panels; that version had two
+real problems — a camera that centered on the *mean* ego position could push a method
+that kept driving straight out of frame, and several overlapping, rotating vehicle
+rectangles in the same small area made it hard to tell which color was on top from one
+frame to the next. Giving every method its own dedicated panel and camera (the same
+per-ego "follow" recipe already proven correct in the single-method clips) removes
+both problems. All 6 (scenario, controller) stacks — not just this one — are in
+[Part 5](#part-5-comprehensive-comparative-study).
+
 The headline finding: **dynamic model + NMPC had zero collisions in all 15 of its
 cells across all three scenarios and all five prediction methods** — the exact
 nonconvex avoidance constraint it solves every step holds up regardless of which
@@ -209,6 +237,37 @@ above the QP's own worst case. Measured, not assumed — exactly the same discip
 Part 2's original solve-time benchmarking used.
 
 ![Multimodal obstacle avoidance: the pedestrian stops](results/multimodal_obstacle_plot_stop.png)
+
+### Which combination is best, and is this publication-ready?
+
+**Best system in this study: dynamic bicycle model + NMPC + multimodal SSM.** It is
+the only cell with zero collisions across every scenario in the matrix, it gets the
+best mean closest-approach (1.92 m) of all five predictors on the safety-critical
+ambiguous-stop case, and its mean solve time (29 ms) beats the QP's (83 ms) even
+though its tail (1.7 s worst-case) is heavier — the honest trade-off is tail solve
+time and IPOPT/CasADi's extra implementation weight against LTV-MPC's simpler, more
+predictable QP. If a single deployable recommendation were needed: NMPC + multimodal
+SSM for safety-critical prediction under ambiguity, with LTV-MPC's QP kept as the
+lighter-weight fallback where the tail-latency risk isn't acceptable.
+
+**Publication readiness, stated plainly rather than oversold**: this is solid
+technical-report / project-portfolio quality — a real ablation matrix (not a single
+demo), matched-trial experimental design, an honest visualization of per-trial vs.
+mean statistics (see the note above), a real 2D simulator replay, and 21 references
+spanning 2024-2026 SSM/MPC literature. It is **not yet at peer-review submission
+quality** for a controls/robotics venue, for reasons worth naming rather than
+glossing over: (1) **4 trials per cell** is enough to catch a qualitative pattern
+(e.g., "LTV-MPC's linearized constraints can conflict") but too few for a defensible
+confidence interval — a paper would want dozens to hundreds; (2) **3 scenario
+families** (one deterministic, two branches of one ambiguous case) is narrow next to
+the scenario diversity a trajectory-prediction paper typically covers; (3) **CV/CTRV
+are reasonable classical baselines but not the field's current strongest ones** — a
+submission would want at least one more recent learned baseline (e.g., a Trajectron++
+or MTR-style model) rather than only this project's own SSM against classical
+filters; (4) **all data is synthetic** — every real trajectory-prediction paper in the
+21 references validates on real recorded pedestrian/vehicle data (nuScenes, Waymo
+Open, ETH/UCY, etc.), and this project has none. None of these are hard to state as
+"future work" in a report; they're exactly what a reviewer would flag in a submission.
 
 ## Part 1: kinematic model + LTV-MPC
 
@@ -989,6 +1048,17 @@ deviation, collision count, and per-step solve time.
 
 ![Full ablation matrix: bar charts](results/ablation_bars.png)
 
+Each bar is the mean ± std over 4 trials; each dot/X on top of it is one individual
+trial's closest approach (gray dot = safe, red X = collided). **Collision is decided
+per-trial against the raw `min_dist` value, never against the mean** -- `min_dist <
+0.6 m` on that one trial, full stop -- so it is expected and correct for a bar (and
+even its error bar) to sit above the dashed threshold line while a red X for one of
+its own trials sits below it; the "N coll." annotation always refers to the same
+per-trial data the dots plot, never to the bar height. `comparative_study.py` stores
+each trial's raw `min_dist`/`collision` values (`*_trials` keys in
+`comparative_study.json`) specifically so this figure isn't limited to summary
+statistics.
+
 ![Full ablation matrix: heatmap summary](results/ablation_matrix_heatmap.png)
 
 ![Solve-time comparison under obstacle avoidance](results/ablation_solve_time.png)
@@ -1040,10 +1110,64 @@ less-accurate physics stack (highway-env's built-in `Vehicle` uses a simpler
 kinematic model with no tire slip). The translucent red ring around the pedestrian is
 the actual hard keep-out radius the controller's constraint enforces, drawn to scale.
 
+**Multi-method comparison scenes.** `render_stacked_comparison()` in the same file
+renders one mini-panel per prediction method -- five panels stacked vertically in a
+single figure, each with its own camera centered on its own ego (the same per-ego
+"follow" recipe the single-method clips above already use) -- all five reacting to
+the identical true pedestrian trajectory, color-coded, with a header that tags any
+method that actually collided on that specific trial (`collision_trials[trial_idx]`
+from `comparative_study.json` -- ground truth from the metric code, not eyeballed off
+the render). This directly answers "how do the five methods compare visually" instead
+of requiring five separate single-method clips to be compared by eye, and it is
+generated for **every (scenario, controller) pair in the study, not a cherry-picked
+subset** -- all three scenarios under both controllers, six scenes in total:
+
+*Scenario A (Part 3's deterministic stopping pedestrian):*
+
+![Kinematic + LTV-MPC, Scenario A, trial 1 -- CTRV and multimodal SSM collide, the other three don't](results/highwayenv_stack_moving_stop_kinematic.gif)
+
+![Dynamic + NMPC, Scenario A -- the same scenario, no collisions with the exact nonconvex constraint](results/highwayenv_stack_moving_stop_dynamic.gif)
+
+*Scenario B1 (ambiguous pedestrian, true outcome go):*
+
+![Kinematic + LTV-MPC, Scenario B1, trial 1 -- CTRV collides, the other four don't](results/highwayenv_stack_ambiguous_go_kinematic.gif)
+
+![Dynamic + NMPC, Scenario B1 -- no collisions](results/highwayenv_stack_ambiguous_go_dynamic.gif)
+
+*Scenario B2 (ambiguous pedestrian, true outcome stop -- the safety-critical case):*
+
+![Kinematic + LTV-MPC, Scenario B2 -- no collisions, but flatter margins across methods](results/highwayenv_stack_ambiguous_stop_kinematic.gif)
+
+![Dynamic + NMPC, Scenario B2 -- no collisions, multimodal SSM keeps the largest margin](results/highwayenv_stack_ambiguous_stop_dynamic.gif)
+
+**Why panels instead of one shared scene.** An earlier version of this renderer drew
+all five egos together in a single shared highway-env scene, and it had two real,
+user-caught problems. First, the shared camera centered on the *mean* position of all
+five egos -- once one method stopped (a collision) while others kept driving, the mean
+dragged toward the stopped vehicles and the still-moving ones could exit the frame
+entirely, so not every method's vehicle was visible throughout the clip. Second, with
+several rotated, overlapping vehicle rectangles occupying the same small screen area,
+which color visually sat "on top" shifted from frame to frame as the vehicles moved
+and rotated relative to each other -- a real rendering artifact, not an actual change
+in any vehicle's assigned color (`VehicleGraphics.get_color` was verified, in
+isolation, to respect a fixed `vehicle.color` every frame). Giving every method its
+own dedicated panel and camera removes both problems outright: a method can never be
+push another method off its own frame, and there is nothing left to overlap.
+
+A quirk worth stating plainly rather than hiding: because each method's own
+prediction changes which control action the controller picks (not just the scenario),
+different methods can diverge into a collision on **different trial indices** even
+though they all saw the exact same true trajectory -- there is no single trial index
+that is simultaneously "the worst case" for every method. `comparative_study.py`
+therefore stores every trial's full trajectory (not just trial 0) in
+`comparative_study_trials.json`, and the scenes above use trial 1 for the two
+(scenario, controller) cells that actually produced a kinematic + LTV-MPC collision,
+trial 0 (the default) everywhere else.
+
 Reproduce the full study with `python src/comparative_study.py` (~15 minutes on 2 CPU
 cores), then `python src/research_plots.py` for the figures above and
-`python src/render_highwayenv.py` for the simulator replays (requires
-`pip install highway-env imageio`).
+`python src/render_highwayenv.py` for the simulator replays, including the
+multi-method comparison scenes (requires `pip install highway-env imageio`).
 
 ## Repository layout
 
