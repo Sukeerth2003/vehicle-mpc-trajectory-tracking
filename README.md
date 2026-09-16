@@ -305,9 +305,23 @@ push a still-moving method's vehicle out of frame (camera centered on the mean o
 diverging positions) and made overlapping rotated vehicles visually hard to tell
 apart. Per-panel rendering removes both problems structurally.
 
+All 3 scenarios × 2 controllers = 6 combinations are rendered below.
+
+**Scenario A (deterministic stopping pedestrian):**
+
 ![Kinematic + LTV-MPC, Scenario A -- CTRV and multimodal SSM collide, the other three don't](results/highwayenv_stack_moving_stop_kinematic.gif)
 
 ![Dynamic + NMPC, same scenario -- the exact nonconvex constraint keeps every method clear](results/highwayenv_stack_moving_stop_dynamic.gif)
+
+**Scenario B1 (ambiguous, true outcome: continue):**
+
+![Kinematic + LTV-MPC, ambiguous-go scenario -- CTRV collides, the other four clear the pedestrian](results/highwayenv_stack_ambiguous_go_kinematic.gif)
+
+![Dynamic + NMPC, ambiguous-go scenario -- every method clears the pedestrian](results/highwayenv_stack_ambiguous_go_dynamic.gif)
+
+**Scenario B2 (ambiguous, true outcome: stop -- safety-critical):**
+
+![Kinematic + LTV-MPC, ambiguous-stop scenario -- every method clears the pedestrian](results/highwayenv_stack_ambiguous_stop_kinematic.gif)
 
 ![Dynamic + NMPC, the safety-critical ambiguous-stop scenario -- multimodal SSM keeps the largest margin](results/highwayenv_stack_ambiguous_stop_dynamic.gif)
 

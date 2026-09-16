@@ -263,26 +263,26 @@ if __name__ == "__main__":
         study = json.load(f)
 
     # Multi-method comparison scenes: all 5 prediction methods replayed, one
-    # per stacked panel, against the identical true trajectory. Trimmed to
-    # the 3 scenes the README actually embeds (kept curated rather than
-    # exhaustive -- see the README's "not too long" request): the flagship
-    # kinematic+LTV-MPC collision case, the same scenario under dynamic+NMPC
-    # for direct contrast (the "controller matters most" headline finding),
-    # and the safety-critical ambiguous-stop case under dynamic+NMPC. The
-    # full 3-scenario x 2-controller sweep still works -- add rows back to
-    # `comparison_targets` to regenerate any of the others; trial 1 is the
-    # illustrative index for moving_stop|kinematic_ltvmpc (an actual
-    # collision trial, see comparative_study.json's collision_trials), trial
-    # 0 (the default) elsewhere. Earlier revisions of this file also
-    # rendered single-method "flagship" clips (render_trial) and all 6
-    # (scenario, controller) stacked scenes; that code is removed here since
-    # those outputs are no longer referenced by the README, but render_trial
-    # itself is kept above as a reusable single-method renderer.
+    # per stacked panel, against the identical true trajectory. Full
+    # 3-scenario x 2-controller sweep (6 scenes total). Trial index is
+    # chosen per cell to be illustrative: an actual collision trial where one
+    # exists (see comparative_study.json's collision_trials), trial 0
+    # (the default) elsewhere. moving_stop|kinematic_ltvmpc and
+    # ambiguous_go|kinematic_ltvmpc both use trial 1 because that is where
+    # ctrv/naive collide in those cells; every other cell has no collision
+    # trial for any method, so trial 0 is used. Earlier revisions of this
+    # file also rendered single-method "flagship" clips (render_trial); that
+    # code is removed here since those outputs are no longer referenced by
+    # the README, but render_trial itself is kept above as a reusable
+    # single-method renderer.
     all_methods = ["naive", "cv", "ctrv", "ssm_uni", "ssm_mm"]
     comparison_targets = [
         # (scenario, controller, trial_idx, out_path)
         ("moving_stop", "kinematic_ltvmpc", 1, "../results/highwayenv_stack_moving_stop_kinematic.gif"),
         ("moving_stop", "dynamic_nmpc", 0, "../results/highwayenv_stack_moving_stop_dynamic.gif"),
+        ("ambiguous_go", "kinematic_ltvmpc", 1, "../results/highwayenv_stack_ambiguous_go_kinematic.gif"),
+        ("ambiguous_go", "dynamic_nmpc", 0, "../results/highwayenv_stack_ambiguous_go_dynamic.gif"),
+        ("ambiguous_stop", "kinematic_ltvmpc", 0, "../results/highwayenv_stack_ambiguous_stop_kinematic.gif"),
         ("ambiguous_stop", "dynamic_nmpc", 0, "../results/highwayenv_stack_ambiguous_stop_dynamic.gif"),
     ]
     for scenario, controller, trial_idx, out_path in comparison_targets:
