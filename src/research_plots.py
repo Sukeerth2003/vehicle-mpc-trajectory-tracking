@@ -132,7 +132,7 @@ def plot_closest_approach_matrix(results: dict, out_path: str):
             data[i, j] = results[scenario][c][m]["min_dist_mean"]
             coll[i, j] = results[scenario][c][m]["n_collisions"]
 
-    fig, ax = plt.subplots(figsize=(14, 4.5))
+    fig, ax = plt.subplots(figsize=(14, 5.2))
     vmax = max(3.0, data.max())
     im = ax.imshow(data, cmap="RdYlGn", vmin=0, vmax=vmax, aspect="auto")
     for i in range(len(SCENARIOS)):
@@ -143,8 +143,12 @@ def plot_closest_approach_matrix(results: dict, out_path: str):
             ax.text(j, i, txt, ha="center", va="center", fontsize=8,
                     color="black" if 0.3 < data[i, j] / vmax < 0.85 else "white")
     ax.set_xticks(range(len(cols)))
-    ax.set_xticklabels([f"{CONTROLLER_LABELS[c].split(' + ')[1]}\n{METHOD_LABELS[m].replace(chr(10), ' ')}"
-                         for c, m in cols], fontsize=7.5, rotation=0)
+    # Keep each method's own line break (e.g. "SSM\n(unimodal)") instead of
+    # collapsing it to one line -- collapsed, "SSM (unimodal)"/"SSM (multimodal)"
+    # are wider than a column and visually overlap the next column's label.
+    # Stacking them onto a 3rd line keeps every label within its own column.
+    ax.set_xticklabels([f"{CONTROLLER_LABELS[c].split(' + ')[1]}\n{METHOD_LABELS[m]}"
+                         for c, m in cols], fontsize=7.5, rotation=0, linespacing=1.35)
     ax.set_yticks(range(len(SCENARIOS)))
     ax.set_yticklabels([SCENARIO_LABELS[s].replace("\n", " ") for s in SCENARIOS], fontsize=8.5)
     ax.set_title("Closest-approach matrix (mean over trials; obstacle radius = 0.6 m)")

@@ -262,40 +262,27 @@ if __name__ == "__main__":
     with open("../results/comparative_study.json") as f:
         study = json.load(f)
 
-    # Flagship visual: the safety-critical "stop" branch, dynamic+NMPC with
-    # the multimodal SSM -- the headline single-method result (see README).
-    targets = [
-        ("ambiguous_stop|dynamic_nmpc|ssm_mm", "../results/highwayenv_ambiguous_stop_mm.gif"),
-        ("ambiguous_stop|dynamic_nmpc|ssm_uni", "../results/highwayenv_ambiguous_stop_uni.gif"),
-        ("moving_stop|dynamic_nmpc|ssm_uni", "../results/highwayenv_moving_stop.gif"),
-    ]
-    for key, out_path in targets:
-        base_key = "|".join(key.split("|")[:3]) + "|0"   # trial 0 for the single-method clips
-        if base_key not in trials:
-            print(f"skip {key}: not found in comparative_study_trials.json")
-            continue
-        data = trials[base_key]
-        ped_traj = np.array(data["ped_traj"])
-        states = np.array(data["states"])[1:]   # drop the initial pre-step state to align with ped_traj[0]
-        render_trial(ped_traj, states, out_path)
-        print(f"saved {out_path}")
-
     # Multi-method comparison scenes: all 5 prediction methods replayed, one
-    # per stacked panel, against the identical true trajectory, for every
-    # (scenario, controller) pair the ablation study covers -- not a
-    # cherry-picked subset, so nothing is hidden either way. Trial indices
-    # are chosen to be illustrative: trial 1 for the two (scenario,
-    # controller) cells that actually produced a kinematic+LTV-MPC collision
-    # (see comparative_study.json's collision_trials), trial 0 (the default)
-    # everywhere else.
+    # per stacked panel, against the identical true trajectory. Trimmed to
+    # the 3 scenes the README actually embeds (kept curated rather than
+    # exhaustive -- see the README's "not too long" request): the flagship
+    # kinematic+LTV-MPC collision case, the same scenario under dynamic+NMPC
+    # for direct contrast (the "controller matters most" headline finding),
+    # and the safety-critical ambiguous-stop case under dynamic+NMPC. The
+    # full 3-scenario x 2-controller sweep still works -- add rows back to
+    # `comparison_targets` to regenerate any of the others; trial 1 is the
+    # illustrative index for moving_stop|kinematic_ltvmpc (an actual
+    # collision trial, see comparative_study.json's collision_trials), trial
+    # 0 (the default) elsewhere. Earlier revisions of this file also
+    # rendered single-method "flagship" clips (render_trial) and all 6
+    # (scenario, controller) stacked scenes; that code is removed here since
+    # those outputs are no longer referenced by the README, but render_trial
+    # itself is kept above as a reusable single-method renderer.
     all_methods = ["naive", "cv", "ctrv", "ssm_uni", "ssm_mm"]
     comparison_targets = [
         # (scenario, controller, trial_idx, out_path)
         ("moving_stop", "kinematic_ltvmpc", 1, "../results/highwayenv_stack_moving_stop_kinematic.gif"),
         ("moving_stop", "dynamic_nmpc", 0, "../results/highwayenv_stack_moving_stop_dynamic.gif"),
-        ("ambiguous_go", "kinematic_ltvmpc", 1, "../results/highwayenv_stack_ambiguous_go_kinematic.gif"),
-        ("ambiguous_go", "dynamic_nmpc", 0, "../results/highwayenv_stack_ambiguous_go_dynamic.gif"),
-        ("ambiguous_stop", "kinematic_ltvmpc", 0, "../results/highwayenv_stack_ambiguous_stop_kinematic.gif"),
         ("ambiguous_stop", "dynamic_nmpc", 0, "../results/highwayenv_stack_ambiguous_stop_dynamic.gif"),
     ]
     for scenario, controller, trial_idx, out_path in comparison_targets:
