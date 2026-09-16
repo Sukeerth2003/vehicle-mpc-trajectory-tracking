@@ -1,25 +1,49 @@
 # Vehicle Trajectory Tracking with State-Space Modeling and MPC
 
-A from-scratch implementation of **Model Predictive Control (MPC)** for autonomous
-vehicle trajectory tracking, in two layers of increasing fidelity:
+A from-scratch, incrementally-built research project on **Model Predictive Control
+(MPC)** for autonomous vehicle trajectory tracking, in five parts of increasing
+fidelity and scope:
 
 1. A **kinematic bicycle model** controlled by **Linear Time-Varying MPC** (a convex
    QP, `cvxpy` + `OSQP`), benchmarked against classical **pure pursuit**.
 2. A **dynamic bicycle model** (tire slip, lateral forces) controlled by **Nonlinear
    MPC** (`CasADi` + `IPOPT`), extended with **static obstacle avoidance** and stress-
    tested for **robustness to crosswind and sensor/process noise**.
-3. A **learned structured state-space sequence model** (S4D-style, `PyTorch`) that
+3. A **learned structured state-space sequence model** (S4D, `PyTorch`) that
    forecasts a *moving* obstacle's future trajectory from its recently observed
    motion, fed directly into the NMPC's obstacle constraint so the controller can
    react to where a pedestrian is *going*, not just where it last saw them.
+4. A **multimodal (K-hypothesis) extension** of that predictor for genuinely
+   ambiguous obstacles, plus **scenario-based NMPC** that stays clear of every
+   plausible future simultaneously rather than betting on the most likely one.
+5. A **comprehensive comparative study**: every controller (kinematic+LTV-MPC,
+   dynamic+NMPC) against every prediction method (naive/CV/CTRV/unimodal
+   SSM/multimodal SSM) on standardized scenarios, a **selective (Mamba-style) SSM**
+   predictor upgrade to genuine research scale (~330k / ~212k parameters, up from
+   ~27.6k), convex obstacle avoidance added to the QP controller, and 2D
+   simulator (highway-env) replay visuals.
 
 Every result below is measured, not asserted — including the results that don't
-flatter this project's own methods (pure pursuit beats MPC on a circle; two real
-NMPC convergence bugs found via stress-testing and benchmarking; a genuinely
-collision-causing NMPC fallback bug found while building the moving-obstacle demo;
-and how each was fixed).
+flatter this project's own methods (pure pursuit beats MPC on a circle; several real
+NMPC/QP convergence bugs found via stress-testing and benchmarking; a mixture model
+that only partially specializes; a QP-based obstacle avoidance scheme that collides
+more often than NMPC's exact constraint — and how each finding was investigated).
 
 ![NMPC (dynamic model) tracking a figure-eight](results/nmpc_tracking.gif)
+
+## Table of contents
+
+- [Why this project](#why-this-project)
+- [Results at a glance](#results-at-a-glance)
+- [Part 1: kinematic model + LTV-MPC](#part-1-kinematic-model--ltv-mpc)
+- [Part 2: dynamic model + NMPC](#part-2-dynamic-model--nmpc)
+- [Part 3: moving-obstacle prediction with a learned state-space model](#part-3-moving-obstacle-prediction-with-a-learned-state-space-model)
+- [Part 4: multimodal prediction + scenario-based NMPC](#part-4-multimodal-prediction--scenario-based-nmpc)
+- [Part 5: comprehensive comparative study](#part-5-comprehensive-comparative-study)
+- [Repository layout](#repository-layout)
+- [Running it](#running-it)
+- [Extensions](#extensions)
+- [References](#references)
 
 ## Why this project
 
@@ -97,9 +121,14 @@ set, ADE/FDE in meters, lower is better):
 
 | Predictor | ADE | FDE |
 |---|---|---|
-| **SSM (learned)** | **0.521 ± 0.343 m** | **0.982 ± 0.699 m** |
-| Constant velocity (CV) | 0.701 ± 0.445 m | 1.362 ± 0.876 m |
-| Constant turn rate + velocity (CTRV) | 1.555 ± 0.929 m | 3.009 ± 1.872 m |
+| **SSM (selective, ~330k params)** | **0.482 ± 0.329 m** | **0.927 ± 0.654 m** |
+| Constant velocity (CV) | 0.704 ± 0.454 m | 1.381 ± 0.860 m |
+| Constant turn rate + velocity (CTRV) | 1.515 ± 0.906 m | 2.996 ± 1.856 m |
+
+(As of the Part 5 research-scale upgrade, this is a *selective* S4D block — Mamba-style
+input-dependent discretization, ~330k parameters — not the original ~27.6k-parameter
+plain-S4D demo model; see [Part 5](#part-5-comprehensive-comparative-study) for the
+architecture change and why.)
 
 **Part 3 — moving-obstacle avoidance** (8 Monte Carlo trials, identical true
 pedestrian trajectory + sensor noise per trial across all three obstacle-prediction
@@ -109,7 +138,7 @@ methods):
 |---|---|---|---|
 | Naive (static, last-seen position) | 1.75 ± 0.02 m | 1.89 ± 0.22 m | 0/8 |
 | Constant velocity (CV) | 1.50 ± 0.49 m | 2.22 ± 1.01 m | 0/8 |
-| **SSM (learned)** | **1.80 ± 0.12 m** | 2.37 ± 0.66 m | 0/8 |
+| **SSM (learned)** | **1.74 ± 0.10 m** | 2.07 ± 0.48 m | 0/8 |
 
 The SSM predictor wins on both trajectory-forecasting accuracy and the metric that
 actually matters downstream — it gives the *safest and most consistent* avoidance
@@ -130,24 +159,54 @@ obstacle-prediction strategy changes):
 | Prediction strategy | Closest approach — pedestrian stops | Closest approach — pedestrian continues |
 |---|---|---|
 | Constant velocity (CV) | 1.61 ± 0.27 m | **2.62 ± 0.53 m** |
-| Unimodal SSM (Part 3) | 1.70 ± 0.10 m | 2.51 ± 0.60 m |
-| **Multimodal SSM (2 hypotheses)** | **1.77 ± 0.10 m** | 2.54 ± 0.56 m |
+| Unimodal SSM (Part 3) | 1.70 ± 0.07 m | 2.50 ± 0.60 m |
+| **Multimodal SSM (2 hypotheses)** | **1.79 ± 0.14 m** | 2.58 ± 0.52 m |
 
-Zero collisions for every method across all 36 trials, but the two single-point
-predictors get there differently: CV's higher mean closest-approach when the
-pedestrian keeps moving is offset by it being the *worst and most erratic* performer
-in the case that actually matters — the pedestrian stopping in the ego's path (lowest
-mean margin, by far the highest variance, 0.27 m vs. the multimodal predictor's
-0.10 m). The multimodal predictor, which hedges against *both* "keeps walking" and
-"slows down" simultaneously rather than committing to one prediction, wins the
-safety-critical case outright while staying competitive (and lower-variance) in the
-easy one. See
+Zero collisions for every method across all 36 trials. The multimodal predictor,
+which hedges against *both* "keeps walking" and "slows down" simultaneously rather
+than committing to one prediction, wins the safety-critical case outright on mean
+closest-approach; the unimodal SSM is actually the most *consistent* there (lowest
+variance, 0.07 m), with the multimodal predictor and CV both more variable (0.14 m
+and 0.27 m) — CV, notably, is the worst and most erratic performer of the three in
+the case that actually matters, the pedestrian stopping in the ego's path. So this
+isn't "multimodal strictly dominates": it buys a better average safety margin in the
+hard case at some cost in trial-to-trial consistency relative to the simpler unimodal
+model, a genuine trade-off worth stating plainly rather than rounding off. See
 [Part 4: multimodal prediction](#part-4-multimodal-prediction--scenario-based-nmpc)
 for the honest, harder story behind this table: getting a mixture model to actually
 specialize into two different hypotheses instead of collapsing into one took three
-real rounds of debugging, and even the final version doesn't fully resolve — the
-"cautious" hypothesis predicts meaningfully less forward motion than the "confident"
-one, but doesn't converge all the way to the true stopping distance.
+real rounds of debugging. With the research-scale model (Part 5), specialization is
+now close but still not exact: the "confident" mode's predicted final displacement on
+true-"go" samples is 1.92 m against a true 1.99 m, and the "cautious" mode's on
+true-"stop" samples is 0.84 m against a true 0.47 m — both hypotheses land on
+recognizably different, correctly-ordered behaviors, closer to the ground truth than
+the original small model got, but the "cautious" mode still doesn't converge all the
+way to a full stop.
+
+![Multimodal obstacle avoidance: the pedestrian stops (highway-env replay)](results/highwayenv_ambiguous_stop_mm.gif)
+
+**Part 5 — comprehensive ablation study: {kinematic + LTV-MPC, dynamic + NMPC} x
+{naive, CV, CTRV, unimodal SSM, multimodal SSM}, on 3 standardized scenarios** (see
+[Part 5](#part-5-comprehensive-comparative-study) for the full 30-cell matrix, every
+combination's closest-approach/lateral-deviation/solve-time/collision numbers, and
+the methodology):
+
+![Full ablation matrix](results/ablation_bars.png)
+
+The headline finding: **dynamic model + NMPC had zero collisions in all 15 of its
+cells across all three scenarios and all five prediction methods** — the exact
+nonconvex avoidance constraint it solves every step holds up regardless of which
+predictor feeds it. **Kinematic model + LTV-MPC collided in 4 of its 15 cells**,
+concentrated in the naive/CTRV baselines and, notably, in the multimodal SSM on the
+*non-ambiguous* scenario — its own two hard hypothesis-constraints, each only a
+linearized (convex) approximation of the true keep-out circle, occasionally clash
+with each other or with actuator limits in a way IPOPT's exact per-solve nonconvex
+constraint doesn't. NMPC's advantage isn't free, though: LTV-MPC's QP solves faster
+on average across this matrix (83 ms mean, 197 ms worst-case) than IPOPT's mean (29
+ms) might suggest it should lose by — but IPOPT's *worst* case, dominated by the
+harder obstacle-avoidance geometries, spikes to 1.7 s, over an order of magnitude
+above the QP's own worst case. Measured, not assumed — exactly the same discipline
+Part 2's original solve-time benchmarking used.
 
 ![Multimodal obstacle avoidance: the pedestrian stops](results/multimodal_obstacle_plot_stop.png)
 
@@ -491,9 +550,14 @@ Parameterization and Initialization of Diagonal State Space Models," 2022):
   continuing the same recurrent state forward — a genuine free-running forecast at
   inference time, with no new observations.
 
-It's deliberately small (~27.6k parameters at the default config) — this is a
-demonstration of the architecture integrated end-to-end into a control system, not
-an attempt at a state-of-the-art forecasting model.
+This section originally shipped with a deliberately small model (~27.6k parameters)
+as an architecture demonstration rather than an attempt at state-of-the-art
+forecasting. [Part 5](#part-5-comprehensive-comparative-study) upgrades the default
+block to a *selective* S4D layer (Mamba-style input-dependent discretization, see
+`SelectiveS4DLayer` in [`src/ssm_predictor.py`](src/ssm_predictor.py)) at a genuine
+research scale (~330k parameters for this predictor); the original plain-S4D block
+is kept in the same file (`selective=False`) for direct comparison rather than
+deleted. The numbers in this section are the current, research-scale model's.
 
 ### Data, training, and two real bugs found along the way
 
@@ -535,34 +599,42 @@ correct history never practices recovering from its own mistakes, but at inferen
 it *only* ever sees its own (imperfect) predictions feeding forward autoregressively
 — a task it was never trained for. The fix: `ObstaclePredictor.forward` accepts a
 `teacher_forcing_prob` that's annealed from 1.0 (fully teacher-forced) to 0.0 (fully
-autoregressive) over the 80 training epochs. This fully resolved the issue —
-validation loss now decreases properly, with the best checkpoint landing near the
-end of training (epoch 77 of 80).
+autoregressive) over training (40 epochs at the current research scale — trimmed
+down from the original small model's 80 to keep CPU training time reasonable at
+~12x the parameter count; see [Part 5](#part-5-comprehensive-comparative-study)).
+This fully resolved the issue — validation loss now decreases properly, with the
+best checkpoint landing near the end of training (epoch 34 of 40 at the current
+research scale).
 
-**Test-set results** (held out, fixed noise seed, meters):
+**Test-set results** (held out, fixed noise seed, meters; research-scale selective
+SSM, ~330k params):
 
 | Predictor | ADE | FDE |
 |---|---|---|
-| **SSM (learned)** | **0.521 ± 0.343 m** | **0.982 ± 0.699 m** |
-| CV | 0.701 ± 0.445 m | 1.362 ± 0.876 m |
-| CTRV | 1.555 ± 0.929 m | 3.009 ± 1.872 m |
+| **SSM (learned)** | **0.482 ± 0.329 m** | **0.927 ± 0.654 m** |
+| CV | 0.704 ± 0.454 m | 1.381 ± 0.860 m |
+| CTRV | 1.515 ± 0.906 m | 2.996 ± 1.856 m |
 
 Broken down per motion pattern (ADE, meters) so an aggregate win can't hide a
 per-pattern loss:
 
 | Pattern | SSM | CV | CTRV |
 |---|---|---|---|
-| constant_velocity | **0.245** | 0.485 | 1.555 |
-| decelerating | **0.357** | 0.560 | 1.284 |
-| constant_turn | 0.720 | **0.672** | 1.721 |
-| weave | **0.719** | 1.041 | 1.673 |
+| constant_velocity | **0.232** | 0.525 | 1.526 |
+| decelerating | **0.332** | 0.623 | 1.347 |
+| constant_turn | **0.634** | 0.613 | 1.550 |
+| weave | **0.720** | 1.064 | 1.623 |
 
-Honestly reported: the SSM predictor loses narrowly to CV on `constant_turn` — a
-pattern whose geometry (near-constant curvature) is close to CTRV's own analytic
-assumption, and where a small, fixed model has less to gain from learning over a
-hand-designed extrapolator. It wins clearly everywhere else, especially on
+The larger selective-SSM model closes the one gap the original small model had:
+where the ~27.6k-parameter plain-S4D model lost narrowly to CV on `constant_turn`
+(0.720 vs. 0.672 m), the research-scale selective model now wins there too (0.634 vs.
+0.613 m) — extra capacity and the Mamba-style input-dependent discretization
+recovering the one pattern that used to favor a hand-designed extrapolator. It wins
+clearly on every other pattern as well, especially `constant_velocity` and
 `decelerating`, the pattern that matters most for the demo below. Reproduce with
-`python src/train_predictor.py` (~80 epochs, well under a minute on CPU).
+`python src/train_predictor.py` (~40 epochs, roughly 15-20 min on 2 CPU cores at
+this scale — see [Part 5](#part-5-comprehensive-comparative-study) for why the
+epoch/dataset-size budget was trimmed from the original small model's).
 
 ### Integrating moving obstacles into NMPC
 
@@ -627,25 +699,22 @@ across every trial, which should have been suspicious on its own.)
 |---|---|---|---|
 | naive | 1.75 ± 0.02 m | 1.89 ± 0.22 m | 0/8 |
 | cv | 1.50 ± 0.49 m | 2.22 ± 1.01 m | 0/8 |
-| **ssm** | **1.80 ± 0.12 m** | 2.37 ± 0.66 m | 0/8 |
+| **ssm** | **1.74 ± 0.10 m** | 2.07 ± 0.48 m | 0/8 |
 
 ![Moving-obstacle avoidance: naive vs. CV vs. SSM prediction](results/moving_obstacle_plot.png)
 
-The honest reading of this table isn't "SSM wins on every axis." SSM gets the
-**highest mean closest-approach and by far the lowest variance** — it's the safest
-*and* the most consistent, because it's the only method that recognizes the
-pedestrian is decelerating and adjusts early and reliably. Its max-lateral-deviation
-is not the lowest, because recognizing the danger early means committing to an
-avoidance maneuver sooner and (in some trials) more decisively than CV — which,
-when it happens to guess right, occasionally out-glides SSM narrowly on that one
-metric, but at much higher variance. CV is the most erratic of the three: it can
-badly mispredict a stopping pedestrian as continuing to cross, occasionally forcing
-a much sharper last-moment correction (its 0.49 m std on closest-approach vs. SSM's
-0.12 m tells that story on its own), and it's the method that actually collided in
-early debugging before the fallback fix above. Naive is closest-approach-consistent
-almost by construction (it never reacts to the pedestrian's motion at all, so it
-never gets it dramatically wrong or dramatically right) but gives up the most real
-safety margin on average.
+The honest reading of this table isn't "SSM wins on every axis." SSM's mean
+closest-approach effectively ties naive's (1.74 vs. 1.75 m) and both comfortably beat
+CV's (1.50 m, dragged down by CV badly mispredicting a stopping pedestrian as
+continuing to cross in some trials — its 0.49 m std tells that story on its own).
+Naive has the *lowest* variance of the three (0.02 m) — but that's an artifact of
+never reacting to the pedestrian at all, so it never gets a trial dramatically wrong
+*or* dramatically right; it's consistent by construction, not because it understands
+anything. SSM is the only method that recognizes the pedestrian is decelerating and
+adjusts accordingly, which is what actually matters for a method meant to generalize
+beyond this one scenario (see the harder, more varied test in
+[Part 5](#part-5-comprehensive-comparative-study), where naive's blind consistency
+stops being an advantage and it collides while SSM doesn't).
 
 Reproduce with `python src/moving_obstacle_demo.py` (loads the trained weights from
 `results/ssm_predictor.pt`; run `train_predictor.py` first if that file doesn't
@@ -736,23 +805,28 @@ secretly predicting nearly the same thing).
    training-time supervision, not input leakage, and it's exactly analogous to how a
    real dataset with logged outcomes would be used.
 
-**The honest result.** With all three fixes, mode *assignment* is now clean: on held-out
-test data, mode 0 wins 98% of true "go" samples and mode 1 wins 100% of true "stop"
-samples. But the underlying *behavior* is only partly resolved -- mode 0's predicted
-final displacement (1.93 m) closely tracks the true "go" outcome (1.99 m), while mode
-1's (1.17-1.20 m) is clearly and consistently lower than mode 0's, representing a
-real, meaningfully more cautious hypothesis, but does **not** converge all the way to
-the true "stop" outcome's magnitude (0.47 m) within this training budget. Reported as
-what it is: real, checkable specialization into two different behaviors, not a fully
-resolved bimodal fit. (`mean_top_mode_prob_branch` and `mean_top_mode_prob_unambiguous`
+**The honest result.** With all three fixes, mode *assignment* is clean: on held-out
+test data, mode 0 wins 98.2% of true "go" samples and mode 1 wins 100% of true "stop"
+samples. The underlying *behavior* is close but still not exact -- mode 0's predicted
+final displacement (1.92 m) closely tracks the true "go" outcome (1.99 m), while mode
+1's (0.84 m) is clearly and consistently lower than mode 0's, representing a real,
+meaningfully more cautious hypothesis that lands much closer to the true "stop"
+outcome's magnitude (0.47 m) than the original small model managed (which landed
+around 1.17-1.20 m -- essentially not distinguishing "cautious" from "confident" by
+magnitude at all). The larger, selective-SSM model at research scale clearly narrows
+this gap, but "closer" is not "resolved": mode 1 still predicts roughly 80% more
+forward displacement than a true full stop. Reported as what it is: real, checkable,
+improved specialization into two different behaviors, not a fully resolved bimodal
+fit. (`mean_top_mode_prob_branch` (0.61) and `mean_top_mode_prob_unambiguous` (0.61)
 end up close to each other rather than showing lower confidence specifically on
 ambiguous inputs, as might be expected -- on reflection this is the *correct*
 calibrated behavior, not a bug: since the observed window genuinely carries no
 information about the branch, the best the probability head can do is learn the
 population base rate, the same as it would for any single unimodal pattern.)
 
-Reproduce with `python src/train_multimodal_predictor.py` (~2 minutes on CPU) --
-it prints the full specialization diagnostics, not just accuracy.
+Reproduce with `python src/train_multimodal_predictor.py` (~30 epochs, roughly
+10 minutes on 2 CPU cores at the current research scale) -- it prints the full
+specialization diagnostics, not just accuracy.
 
 ### Scenario-based NMPC: avoiding every plausible hypothesis at once
 
@@ -782,26 +856,194 @@ represented -- a fair, matched comparison, 6 trials each:
 | Prediction strategy | Closest approach — stops | Closest approach — continues | Collisions |
 |---|---|---|---|
 | CV | 1.61 ± 0.27 m | **2.62 ± 0.53 m** | 0/12 |
-| Unimodal SSM | 1.70 ± 0.10 m | 2.51 ± 0.60 m | 0/12 |
-| **Multimodal SSM** | **1.77 ± 0.10 m** | 2.54 ± 0.56 m | 0/12 |
+| Unimodal SSM | 1.70 ± 0.07 m | 2.50 ± 0.60 m | 0/12 |
+| **Multimodal SSM** | **1.79 ± 0.14 m** | 2.58 ± 0.52 m | 0/12 |
 
 ![Multimodal obstacle avoidance: the pedestrian stops](results/multimodal_obstacle_plot_stop.png)
+![Multimodal obstacle avoidance: the pedestrian stops (highway-env replay)](results/highwayenv_ambiguous_stop_mm.gif)
 
 The figure above (a "stop" trial) shows exactly what the numbers summarize: CV
 mispredicts the pedestrian continuing to cross and swerves hard the *wrong* way
 (toward positive Y, straight at where it thinks they're going) before correcting late;
-both SSM-based methods correctly anticipate the stop and move away early. On "go"
-trials the three methods mostly agree closely (no swerve is usually needed at all --
-see `results/multimodal_obstacle_plot_go.png`), which is itself part of the honest
-story: the multimodal predictor's benefit shows up specifically in the case that's
-actually dangerous, not as a general improvement everywhere. No collisions occurred
-for any method across all 36 trials in this run, so the comparison here is about
-*margin and consistency*, not about one method failing outright -- the same framing
+both SSM-based methods correctly anticipate the stop and move away early. The
+multimodal predictor wins on mean margin, but not on consistency: the unimodal SSM's
+0.07 m std is actually the tightest of the three, with the multimodal predictor at
+0.14 m and CV clearly the worst at 0.27 m -- hedging against two hypotheses buys a
+better average outcome here, not a uniformly tighter one. On "go" trials the three
+methods mostly agree closely (no swerve is usually needed at all -- see
+`results/multimodal_obstacle_plot_go.png`), which is itself part of the honest story:
+the multimodal predictor's benefit shows up specifically in the case that's actually
+dangerous, not as a general improvement everywhere. No collisions occurred for any
+method across all 36 trials in this run, so the comparison here is about *margin and
+consistency*, not about one method failing outright -- the same framing
 Part 3 used for its own moving-obstacle results.
 
 Reproduce with `python src/multimodal_obstacle_demo.py` (loads both Part 3's and
 Part 4's trained weights; run their training scripts first if those files don't
 exist).
+
+## Part 5: comprehensive comparative study
+
+### Why this extension
+
+Parts 1-4 each compare a *pair* of things at a time (MPC vs. pure pursuit; kinematic
+vs. dynamic; SSM vs. classical baselines; unimodal vs. multimodal) on whatever
+scenario that part introduced. That's the right way to *build* the project
+incrementally, but it leaves an obvious question unanswered: put every controller and
+every prediction method on the *same* scenarios, at the *same* time, and does the
+story from the individual parts actually hold up? This section is that direct,
+full-factorial comparison -- **{kinematic model + LTV-MPC, dynamic model + NMPC} x
+{naive, CV, CTRV, unimodal SSM, multimodal SSM}**, a 2 x 5 = 10-cell matrix, run on
+3 standardized scenarios (30 cells total), implemented in
+[`src/comparative_study.py`](src/comparative_study.py). It also does two things the
+individual parts didn't need to: it gives the kinematic model's convex QP controller
+obstacle avoidance for the first time (Parts 1-2 only ever gave that to NMPC), and it
+scales the SSM predictors up from architecture demonstrations to a genuine
+research-scale model.
+
+### Scaling the predictor up: selective (Mamba-style) state-space blocks
+
+Parts 3-4's predictors were deliberately small (~27.6k / ~15.9k parameters) --
+demonstrations that the architecture worked end-to-end, not attempts at a strong
+forecasting model. Two changes bring them to research scale:
+
+1. **Selective discretization.** [`src/ssm_predictor.py`](src/ssm_predictor.py) adds
+   `SelectiveS4DLayer`/`SelectiveS4DBlock`, which make the SSM's discretization step
+   `Delta` a *learned function of the current input* (`dt_t = dt_base *
+   sigmoid(Linear(u_t))`, zero-initialized so training starts identical to plain
+   S4D) instead of one constant shared by every input. This is the central idea
+   behind Mamba (Gu & Dao, "Mamba: Linear-Time Sequence Modeling with Selective
+   State Spaces," 2023/2024): the model learns to take a "bigger step" (let new
+   input dominate) on informative inputs and hold state on uninformative ones -- a
+   content-aware gate on the recurrence, and the specific change responsible for
+   most of Mamba's improvement over plain S4 in the original paper's own ablations.
+   Full Mamba also makes the `B`/`C` projections input-dependent (the full "S6"
+   scan) and uses a hardware-aware parallel scan for GPU training throughput;
+   neither is implemented here -- the parallel scan exists to make long-sequence
+   GPU training fast, which doesn't apply to this project's short (`K=H=10`),
+   CPU-only, step-by-step recurrence, so it would add engineering risk for no
+   measurable benefit at this scale. The plain-S4D blocks (`S4DLayer`/`S4DBlock`)
+   are kept in the same file and remain selectable (`selective=False`), so the two
+   architectures can be compared directly rather than one being silently deleted.
+2. **More capacity.** `ObstaclePredictor` moved from `d_model=48, d_state=12,
+   n_layers=2` (~27.6k params) to `d_model=160, d_state=40, n_layers=3` (~330k
+   params, ~12x); `MultimodalObstaclePredictor` moved from `d_model=48, d_state=12,
+   n_layers=2` (~15.9k params) to `d_model=128, d_state=32, n_layers=3` (~212k
+   params, ~13x). Both are still trained on 2 CPU cores, no GPU -- which is why
+   epoch counts and dataset sizes were trimmed (80 -> 40 epochs / 1500 -> 800
+   samples-per-pattern for the unimodal predictor, 50 -> 30 epochs for the
+   multimodal one) to keep training time reasonable at roughly an order of magnitude
+   more parameters. The result of both changes
+   together: the unimodal predictor's ADE improved from 0.521 to 0.482 m and closed
+   its one losing pattern (`constant_turn`) against CV; the multimodal predictor's
+   minADE improved from 0.392 to 0.340 m and its mode specialization measurably
+   tightened (see Part 4's updated numbers above). Bigger and more expressive did
+   help here, not just cost more compute -- worth confirming rather than assuming.
+
+### Giving the kinematic model's QP controller obstacle avoidance
+
+[`src/mpc_controller.py`](src/mpc_controller.py)'s LTV-MPC never had any obstacle
+constraint before this section -- Parts 1-2 only ever wired obstacle avoidance into
+the NMPC controller, since a circular keep-out zone is a genuinely nonconvex
+constraint that a QP solver cannot represent exactly. `_obstacle_constraints` adds a
+standard convex *relaxation*: at each horizon step, the nonconvex disk exclusion
+`||pos - center|| >= radius` is replaced by its **linear supporting half-plane** at
+the point on the circle nearest a linearization point --
+`n . (pos - center) >= radius` where `n` is the unit vector from the obstacle center
+toward that linearization point. That's exact exactly on the tangent line through the
+linearization point's nearest approach, and only as good as that point elsewhere --
+unlike NMPC's exact nonconvex constraint, re-solved from scratch every step. The
+linearization point is taken from the *previous* solve's predicted position at that
+horizon step when available (falling back to the reference path on the first solve),
+the same "trust last step's plan" idea Part 2 already used for the fallback-on-
+failure fix. The failure fallback itself is also mirrored from Part 2's NMPC fix: on
+solver failure with an obstacle active, reuse the previous solve's shifted trajectory
+rather than a fresh obstacle-blind guess, for exactly the same reason documented
+there. Multiple hypotheses (scenario-based avoidance against a multimodal predictor)
+are supported the same mechanical way as NMPC: one linear constraint per hypothesis,
+using the exact same `(center, radius)` format `nmpc_controller.solve` accepts, so
+the same obstacle-hypothesis-generation code drives both controllers in this study.
+
+### Methodology
+
+Two scenario families feed both controllers and all five methods, reusing (not
+reimplementing) each one's already-validated ground-truth generator:
+
+- **Scenario A** -- Part 3's deterministic stopping pedestrian
+  (`moving_obstacle_demo.py`): unambiguous, just fast enough to matter.
+- **Scenario B** -- Part 4's genuinely ambiguous go-or-stop pedestrian
+  (`multimodal_obstacle_demo.py`), with the true outcome *forced* to each branch
+  (B1 = "go", B2 = "stop") so both get equal, matched trials rather than depending on
+  a coin flip.
+
+Every controller/method pair sees the *identical* true pedestrian trajectory and
+sensor-noise realization within a given (scenario, trial) -- the same matched-
+comparison discipline `robustness_experiment.py` and the Part 3/4 demos use -- run
+for 4 trials per cell, 110 control steps each. Five prediction methods: **naive**
+(static, last-seen position), **CV**, **CTRV**, **unimodal SSM** (Part 3/5's
+predictor, one hypothesis), and **multimodal SSM** (Part 4/5's predictor, two
+hypotheses, scenario-based avoidance). Metrics: closest approach, max lateral
+deviation, collision count, and per-step solve time.
+
+### Results
+
+![Full ablation matrix: bar charts](results/ablation_bars.png)
+
+![Full ablation matrix: heatmap summary](results/ablation_matrix_heatmap.png)
+
+![Solve-time comparison under obstacle avoidance](results/ablation_solve_time.png)
+
+**The controller matters more than the predictor for collision-freedom.** Across all
+30 cells (15 per controller), **dynamic model + NMPC had zero collisions in every
+single one** -- regardless of which of the five prediction methods fed it, on every
+scenario. **Kinematic model + LTV-MPC collided in 4 of its 15 cells**: naive and CTRV
+on Scenario A (1/4 trials each), CTRV on Scenario B1 (1/4), and -- the most
+noteworthy result in this table -- **multimodal SSM on Scenario A (2/4 trials)**,
+the *non-ambiguous* scenario, where the extra hypothesis buys nothing but still costs
+a second simultaneous linear constraint that can conflict with actuator limits or the
+first constraint under the QP's linearized approximation. NMPC's exact per-solve
+nonconvex constraint doesn't have this failure mode: scenario-based avoidance against
+two hypotheses cost it nothing in collision rate anywhere in the matrix.
+
+**On Scenario B2 (the safety-critical ambiguous "stop" case), the Part 4 finding
+holds up under the full comparison**: for dynamic + NMPC, multimodal SSM gets the
+best mean closest-approach of all five methods (1.92 m), ahead of unimodal SSM
+(1.91 m), CTRV (1.76 m), CV (1.85 m), and naive (1.81 m). For kinematic + LTV-MPC on
+the same scenario, though, the ranking is much flatter (1.41-1.53 m across all five
+methods, no collisions) -- the convex approximation's extra conservatism/inexactness
+mostly washes out whatever edge a better predictor would otherwise buy it, another
+real (if less flattering) data point about what the controller, not just the
+predictor, contributes to the final safety margin.
+
+**Solve time inverts the naive expectation, consistent with Part 2.** Averaged
+across the whole matrix, LTV-MPC's QP (OSQP) solves in 83 ms mean / 197 ms worst-case
+per step; NMPC's IPOPT solves in 29 ms mean but spikes to 1.7 s worst-case -- more
+than an order of magnitude above the QP's own worst case. The same story Part 2's
+original benchmarking found (a warm-started NLP can out-solve a from-scratch QP on
+*median* cost while being far heavier in the *tail*) reproduces here under obstacle
+avoidance specifically, which is a real, independent confirmation rather than a
+restatement of the same measurement.
+
+### A real 2D simulator, not just matplotlib
+
+[`src/render_highwayenv.py`](src/render_highwayenv.py) replays this study's recorded
+trajectories inside [highway-env](https://github.com/Farama-Foundation/HighwayEnv)
+(Leurent, 2018) -- a real, widely-used 2D driving-simulator renderer -- instead of
+this project's own matplotlib plots, for the top-down "traffic scene" look common in
+trajectory-prediction and autonomous-driving papers. Important distinction:
+highway-env's own vehicle *physics and decision-making* are not used at all here --
+only its road/vehicle *rendering* (`highway_env.road.graphics`,
+`highway_env.vehicle.graphics`). Every trajectory drawn is exactly what this
+project's own validated NMPC/LTV-MPC controllers and dynamic/kinematic bicycle models
+produced in `comparative_study.py`: a *replay*, not a re-simulation under a different,
+less-accurate physics stack (highway-env's built-in `Vehicle` uses a simpler
+kinematic model with no tire slip). The translucent red ring around the pedestrian is
+the actual hard keep-out radius the controller's constraint enforces, drawn to scale.
+
+Reproduce the full study with `python src/comparative_study.py` (~15 minutes on 2 CPU
+cores), then `python src/research_plots.py` for the figures above and
+`python src/render_highwayenv.py` for the simulator replays (requires
+`pip install highway-env imageio`).
 
 ## Repository layout
 
@@ -824,8 +1066,11 @@ exist).
 │   ├── trajectory_baselines.py    # CV / CTRV classical extrapolation baselines + ADE/FDE metrics
 │   ├── train_predictor.py         # trains + validates the SSM predictor against the baselines
 │   ├── moving_obstacle_demo.py    # moving-obstacle NMPC demo: naive vs. CV vs. SSM prediction
-│   ├── train_multimodal_predictor.py # trains the K-hypothesis mixture SSM predictor (Part 4)
+│   ├── train_multimodal_predictor.py # trains the K-hypothesis mixture SSM predictor (Part 4/5)
 │   ├── multimodal_obstacle_demo.py   # scenario-based NMPC demo: CV vs. unimodal vs. multimodal SSM
+│   ├── comparative_study.py       # Part 5: full {controller} x {method} x {scenario} ablation matrix
+│   ├── research_plots.py          # Part 5: publication-style bar/heatmap/solve-time figures
+│   ├── render_highwayenv.py       # Part 5: replays recorded trials in highway-env's 2D renderer
 │   └── visualize.py               # animated GIFs + comparison plots (shared by all of the above)
 ├── notebooks/
 │   └── demo.ipynb             # walkthrough: derive, simulate, visualize, compare (Part 1)
@@ -852,13 +1097,18 @@ python src/obstacle_demo.py           # obstacle avoidance: closest-approach num
 python src/robustness_experiment.py   # Monte Carlo robustness study (~2-3 min)
 python src/robustness_plot.py         # bar chart from the study above
 
-# Part 3: moving-obstacle prediction (state-space neural network)
-python src/train_predictor.py         # trains the SSM predictor, evaluates vs. CV/CTRV (~4 min on CPU)
+# Part 3: moving-obstacle prediction (research-scale selective-SSM, ~330k params)
+python src/train_predictor.py         # trains the SSM predictor, evaluates vs. CV/CTRV (~15-20 min on 2 CPU cores)
 python src/moving_obstacle_demo.py    # NMPC + naive/CV/SSM prediction: 8-trial comparison + GIF/plot
 
-# Part 4: multimodal prediction + scenario-based NMPC
-python src/train_multimodal_predictor.py  # trains the 2-hypothesis mixture SSM predictor (~2 min on CPU)
+# Part 4: multimodal prediction + scenario-based NMPC (research-scale, ~212k params)
+python src/train_multimodal_predictor.py  # trains the 2-hypothesis mixture SSM predictor (~10 min on 2 CPU cores)
 python src/multimodal_obstacle_demo.py    # NMPC + CV/unimodal/multimodal SSM on a genuinely ambiguous pedestrian (~3 min)
+
+# Part 5: comprehensive comparative study
+python src/comparative_study.py       # full 2x5x3 ablation matrix (~15 min on 2 CPU cores)
+python src/research_plots.py          # publication-style bar/heatmap/solve-time figures from the study above
+pip install highway-env imageio && python src/render_highwayenv.py   # 2D simulator replay GIFs
 ```
 
 **Solve times, measured (not assumed).** "NMPC is slower per-solve than a QP" is the
@@ -934,35 +1184,107 @@ that still produced an honest, working result (Part 1), then grew it deliberatel
   attention-based prediction) rather than being forecast independently, and
   unsupervised (rather than label-forced) mode discovery for real-world data where
   the ground-truth branch isn't known at training time.
+- ✅ **Comprehensive comparative study** — every controller (kinematic+LTV-MPC,
+  dynamic+NMPC) against every prediction method (naive, CV, CTRV, unimodal SSM,
+  multimodal SSM) on standardized scenarios, a genuine research-scale selective
+  (Mamba-style) SSM predictor upgrade, convex obstacle avoidance added to the QP
+  controller for the first time, and 2D simulator (highway-env) replay visuals. See
+  [Part 5](#part-5-comprehensive-comparative-study).
 - ⬜ **Hardware-in-the-loop.** Port the controller to run in real time against a
   higher-fidelity simulator (e.g. CARLA) or a small RC/robot testbed — the one
   extension from the original plan not yet built here.
+- ⬜ **Full Mamba (selective B/C + parallel scan).** Part 5's selective SSM only
+  makes the discretization step input-dependent; making `B`/`C` input-dependent too
+  and implementing a hardware-aware parallel scan would matter far more at GPU scale
+  and on longer sequences than this project's `K=H=10` uses.
 
 ## References
 
-- R. Rajamani, *Vehicle Dynamics and Control*, Springer, 2011 — kinematic/dynamic
-  bicycle models.
-- J. Kong et al., "Kinematic and dynamic vehicle models for autonomous driving
-  control design," *IEEE Intelligent Vehicles Symposium*, 2015 — the LTV-MPC
-  approach used here.
-- R. C. Coulter, "Implementation of the Pure Pursuit Path Tracking Algorithm,"
-  CMU Robotics Institute Technical Report, 1992.
-- J. B. Rawlings, D. Q. Mayne, M. Diehl, *Model Predictive Control: Theory,
-  Computation, and Design*, 2nd ed., Nob Hill Publishing, 2017.
-- J. A. E. Andersson, J. Gillis, G. Horn, J. B. Rawlings, M. Diehl, "CasADi -- A
-  software framework for nonlinear optimization and optimal control,"
-  *Mathematical Programming Computation*, 2019 — the NMPC implementation here.
-- A. Wächter, L. T. Biegler, "On the implementation of an interior-point filter
-  line-search algorithm for large-scale nonlinear programming," *Mathematical
-  Programming*, 2006 — IPOPT, the NLP solver CasADi calls for NMPC.
-- A. Gu, K. Goel, C. Ré, "Efficiently Modeling Long Sequences with Structured State
-  Spaces," *ICLR*, 2022 — the S4 architecture behind Part 3's trajectory predictor.
-- A. Gu, A. Gupta, K. Goel, C. Ré, "On the Parameterization and Initialization of
-  Diagonal State Space Models," *NeurIPS*, 2022 — S4D, the diagonal simplification
-  used here.
-- S. Bengio, O. Vinyals, N. Jaitly, N. Shazeer, "Scheduled Sampling for Sequence
-  Prediction with Recurrent Neural Networks," *NeurIPS*, 2015 — the exposure-bias
-  fix used to train the predictor (see Part 3).
-- H. Cui et al., "Multimodal Trajectory Predictions for Autonomous Driving using
-  Deep Convolutional Networks," *ICRA*, 2019 — the winner-take-all MTP loss (mixture
-  regression + mode classification) adapted for Part 4's multimodal predictor.
+**Vehicle dynamics and MPC**
+
+1. R. Rajamani, *Vehicle Dynamics and Control*, Springer, 2011 — kinematic/dynamic
+   bicycle models.
+2. J. Kong et al., "Kinematic and dynamic vehicle models for autonomous driving
+   control design," *IEEE Intelligent Vehicles Symposium*, 2015 — the LTV-MPC
+   approach used here.
+3. R. C. Coulter, "Implementation of the Pure Pursuit Path Tracking Algorithm,"
+   CMU Robotics Institute Technical Report, 1992.
+4. J. B. Rawlings, D. Q. Mayne, M. Diehl, *Model Predictive Control: Theory,
+   Computation, and Design*, 2nd ed., Nob Hill Publishing, 2017.
+5. J. A. E. Andersson, J. Gillis, G. Horn, J. B. Rawlings, M. Diehl, "CasADi -- A
+   software framework for nonlinear optimization and optimal control,"
+   *Mathematical Programming Computation*, 2019 — the NMPC implementation here.
+6. A. Wächter, L. T. Biegler, "On the implementation of an interior-point filter
+   line-search algorithm for large-scale nonlinear programming," *Mathematical
+   Programming*, 2006 — IPOPT, the NLP solver CasADi calls for NMPC.
+
+**Learning-based and uncertainty-aware MPC (2024-2026)**
+
+7. T. Power, D. Berenson, "Diffusion-Based Model Predictive Control," arXiv:2410.05364,
+   2024 — learned generative models used directly inside an MPC-style planning loop,
+   the same broad direction as this project's learned-predictor-into-hard-constraint
+   integration, via a different (diffusion, not SSM) generative mechanism.
+8. Y. Cao et al., "Dynamic Obstacle Avoidance of UAV Using Chance Constrained Model
+   Predictive Control," *Optimal Control Applications and Methods*, 2025 — chance-
+   constrained (probabilistic, soft) obstacle avoidance under prediction uncertainty,
+   a more statistically principled alternative to this project's hard scenario-based
+   (worst-case-over-hypotheses) avoidance in Part 4/5.
+9. H. Ren, Y. Li, Y. Wang, C.-K. Chen, L. Yang, Y. Zhao, "Learning-based model
+   predictive control for safe path planning and control," *Proc. IMechE Part D*,
+   2025.
+10. "Trajectory Planning with Model Predictive Control for Obstacle Avoidance
+    Considering Prediction Uncertainty," *Advanced Engineering Informatics*,
+    ScienceDirect, 2025 — an uncertainty-aware MPC-planning formulation directly in
+    this project's problem space (predicted-trajectory uncertainty feeding a
+    downstream planner/controller).
+11. W. Zhan et al., "A Survey on Learning-Based Model Predictive Control: Toward
+    Path Tracking Control of Mobile Platforms," *Applied Sciences* 12(4), 2022 —
+    broader survey context for where a learned predictor plugged into MPC (this
+    project's Parts 3-5) sits relative to fully learned MPC policies.
+
+**State-space models and selective SSMs (Mamba)**
+
+12. A. Gu, K. Goel, C. Ré, "Efficiently Modeling Long Sequences with Structured State
+    Spaces," *ICLR*, 2022 — the S4 architecture behind Part 3's trajectory predictor.
+13. A. Gu, A. Gupta, K. Goel, C. Ré, "On the Parameterization and Initialization of
+    Diagonal State Space Models," *NeurIPS*, 2022 — S4D, the diagonal simplification
+    used here.
+14. A. Gu, T. Dao, "Mamba: Linear-Time Sequence Modeling with Selective State
+    Spaces," arXiv:2312.00752, 2023 (rev. 2024) — the selective (input-dependent
+    discretization) mechanism Part 5's `SelectiveS4DLayer` adapts for the
+    research-scale predictor upgrade.
+15. S. Bengio, O. Vinyals, N. Jaitly, N. Shazeer, "Scheduled Sampling for Sequence
+    Prediction with Recurrent Neural Networks," *NeurIPS*, 2015 — the exposure-bias
+    fix used to train the predictor (see Part 3).
+
+**Trajectory prediction and multimodal forecasting (incl. 2024-2026 Mamba-based work)**
+
+16. H. Cui et al., "Multimodal Trajectory Predictions for Autonomous Driving using
+    Deep Convolutional Networks," *ICRA*, 2019 — the winner-take-all MTP loss
+    (mixture regression + mode classification) adapted for Part 4's multimodal
+    predictor.
+17. Y. Huang et al., "Trajectory Mamba: Efficient Attention-Mamba Forecasting Model
+    Based on Selective SSM," *CVPR*, 2025 — a selective-SSM trajectory forecaster at
+    full research scale; the same architectural family as this project's Part 5
+    predictor, at a very different scale and application context (multi-agent
+    driving forecasting benchmarks vs. this project's single-obstacle demo).
+18. "KD-Mamba: Selective State Space Models with Knowledge Distillation for
+    Trajectory Prediction," *Information Fusion*, ScienceDirect, 2025 — knowledge
+    distillation into a selective-SSM predictor, a plausible further direction for
+    compressing this project's research-scale model back down without losing the
+    accuracy gained from it.
+19. "Large Foundation Models for Trajectory Prediction in Autonomous Driving: A
+    Comprehensive Survey," arXiv:2509.10570, 2025 — survey context for where a
+    small, from-scratch, single-obstacle SSM predictor (this project) sits relative
+    to the current foundation-model-scale trajectory-forecasting literature.
+20. "Recent Advances in Multi-Agent Human Trajectory Prediction: A Comprehensive
+    Review," arXiv:2506.14831, 2025 — survey covering multimodal/multi-hypothesis
+    pedestrian forecasting broadly, the same problem class as Part 4/5's
+    genuinely-ambiguous pedestrian scenario at a much larger scale.
+
+**Simulation**
+
+21. E. Leurent, "An Environment for Autonomous Driving Decision-Making,"
+    [github.com/Farama-Foundation/HighwayEnv](https://github.com/Farama-Foundation/HighwayEnv),
+    2018 — the 2D driving-simulator renderer Part 5 uses to replay this project's
+    own controller output (see [Part 5](#part-5-comprehensive-comparative-study)).

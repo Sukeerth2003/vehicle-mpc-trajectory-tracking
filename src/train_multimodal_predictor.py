@@ -70,7 +70,9 @@ N_MODES = 2   # matches the true structure of the "branch" pattern (go / stop) -
 SENSOR_NOISE_STD = 0.05
 # Shared with multimodal_obstacle_demo.py so it constructs an identical
 # model before loading ../results/ssm_predictor_multimodal.pt's state dict.
-MODEL_KWARGS = dict(K=K, H=H, d_model=48, d_state=12, n_layers=2, dt=DT, n_modes=N_MODES)
+# Research-scale (Part 5): selective (Mamba-style) blocks, ~212k params, up
+# from the original demo-scale model's much smaller plain-S4D encoder.
+MODEL_KWARGS = dict(K=K, H=H, d_model=128, d_state=32, n_layers=3, dt=DT, n_modes=N_MODES, selective=True)
 
 
 def build_training_dataset(n_unimodal: int = 500, n_branch: int = 800, seed: int = 0) -> ObstacleDataset:
@@ -271,7 +273,8 @@ if __name__ == "__main__":
           f"(sensor_noise_std={SENSOR_NOISE_STD} m, branch pattern oversampled to help specialization)")
 
     model = MultimodalObstaclePredictor(**MODEL_KWARGS)
-    train(model, train_ds, val_ds)
+    print(f"model params: {sum(p.numel() for p in model.parameters())}")
+    train(model, train_ds, val_ds, epochs=30)
 
     test_noisy = add_observation_noise(test_ds, SENSOR_NOISE_STD, np.random.default_rng(999))
     print("\n--- Test set: minADE_M / minFDE_M (meters), multimodal SSM vs. baselines ---")

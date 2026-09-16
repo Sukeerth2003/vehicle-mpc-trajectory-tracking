@@ -1,6 +1,15 @@
 """
-A small structured state-space neural network (S4D-style) that predicts a
-moving obstacle's future trajectory from its recently observed motion.
+A structured state-space neural network that predicts a moving obstacle's
+future trajectory from its recently observed motion. As of the research-scale
+upgrade (Part 5), the default block is a *selective* S4D layer -- S4D's
+diagonal linear SSM recurrence with a Mamba-style input-dependent
+discretization step (see SelectiveS4DLayer below) -- at a genuinely
+research-scale parameter count (~330k for ObstaclePredictor, ~210k for
+MultimodalObstaclePredictor), not the ~27.6k-parameter demo-scale model this
+project shipped with initially. The original plain-S4D blocks (S4DLayer,
+S4DBlock) are kept in this file and remain selectable (`selective=False`) so
+the two architectures can be compared directly rather than the smaller one
+being silently deleted.
 
 This is a genuinely different "state space" than the rest of the project:
 vehicle_model.py / dynamic_vehicle_model.py are hand-derived physical
@@ -107,13 +116,119 @@ class S4DBlock(nn.Module):
         return residual + y, state
 
 
+class SelectiveS4DLayer(nn.Module):
+    """S4D with *selective* (Mamba-style) discretization: the effective
+    per-step timestep dt is a learned function of the current input instead
+    of a fixed constant.
+
+    S4/S4D (above) discretizes its continuous-time SSM with a single dt fixed
+    for every input, every timestep -- the model's effective "sampling rate"
+    of its own internal dynamics never changes no matter what it's looking
+    at. Mamba's central change (Gu & Dao, "Mamba: Linear-Time Sequence
+    Modeling with Selective State Spaces," arXiv:2312.00752, 2023/2024) is to
+    make the discretization step Delta a function of the input token itself,
+    computed by a small learned projection: intuitively, the model learns to
+    take a "bigger step" (let new input dominate, forget faster) on
+    informative inputs and a "smaller step" (hold state, ignore) on
+    uninformative ones -- an input-dependent, content-aware gate on the
+    state recurrence, which is what "selective" refers to. This is the part
+    of Mamba responsible for most of its improvement over plain S4 in the
+    original paper's ablations.
+
+    Full Mamba also makes the B and C projections input-dependent (a full
+    "S6" scan); this implementation makes *only* Delta input-dependent, and
+    keeps B/C as the same per-channel learned parameters as S4D. That's a
+    deliberate scope reduction, not an oversight: this project already runs
+    its SSM step-by-step (not through Mamba's parallel hardware-aware scan,
+    which exists to make the recurrence trainable at GPU scale) since the
+    sequences here are short (K=H=10) and this runs on CPU, so an
+    input-dependent Delta is the one change that meaningfully matters here
+    without a large increase in parameters/compute for a benefit this
+    project's short sequences wouldn't exercise anyway.
+
+    Delta is produced per-channel per-timestep as
+    dt_base * sigmoid(Linear(u)), bounded to (0, 2*dt_base) and initialized
+    (zero bias) to sigmoid(0) = 0.5 -> dt_base, i.e. identical to plain S4D's
+    fixed dt at initialization, so training starts from the same behavior
+    and *learns* whatever input-dependent deviation from it actually helps.
+    """
+
+    def __init__(self, d_model: int, d_state: int, dt: float):
+        super().__init__()
+        self.d_model, self.d_state, self.dt_base = d_model, d_state, dt
+        self.log_decay = nn.Parameter(torch.rand(d_model, d_state) * 2 - 2)
+        self.omega = nn.Parameter(torch.rand(d_model, d_state) * (math.pi / dt))
+        self.B = nn.Parameter(torch.randn(d_model, d_state) / math.sqrt(d_state))
+        self.C_re = nn.Parameter(torch.randn(d_model, d_state) / math.sqrt(d_state))
+        self.C_im = nn.Parameter(torch.randn(d_model, d_state) / math.sqrt(d_state))
+        self.D = nn.Parameter(torch.zeros(d_model))
+        # Selective discretization: dt_t = dt_base * sigmoid(delta_proj(u)).
+        # Zero-init weight + bias => sigmoid(0) = 0.5 => dt_t = dt_base at
+        # init, exactly matching plain S4D's fixed step (see docstring).
+        self.delta_proj = nn.Linear(d_model, d_model)
+        nn.init.zeros_(self.delta_proj.weight)
+        nn.init.zeros_(self.delta_proj.bias)
+
+    def init_state(self, batch_size: int, device):
+        a = torch.zeros(batch_size, self.d_model, self.d_state, device=device)
+        b = torch.zeros(batch_size, self.d_model, self.d_state, device=device)
+        return (a, b)
+
+    def step(self, u: torch.Tensor, state):
+        """u: (B, d_model) input at this timestep. Returns (y, new_state)."""
+        a, b = state
+        delta = self.dt_base * 2.0 * torch.sigmoid(self.delta_proj(u))   # (B, d_model)
+
+        decay = F.softplus(self.log_decay) + 1e-3                        # (d_model, d_state)
+        r = torch.exp(-decay.unsqueeze(0) * delta.unsqueeze(-1))          # (B, d_model, d_state)
+        theta = self.omega.unsqueeze(0) * delta.unsqueeze(-1)             # (B, d_model, d_state)
+        cos_t, sin_t = torch.cos(theta), torch.sin(theta)
+
+        drive = delta.unsqueeze(-1) * self.B.unsqueeze(0) * u.unsqueeze(-1)  # (B, d_model, d_state)
+        a_new = r * (cos_t * a - sin_t * b) + drive
+        b_new = r * (sin_t * a + cos_t * b)
+
+        y = (self.C_re * a_new - self.C_im * b_new).sum(-1) + self.D * u
+        return y, (a_new, b_new)
+
+
+class SelectiveS4DBlock(nn.Module):
+    """Pre-norm selective-S4D layer + GLU + residual -- same block pattern as
+    S4DBlock, with SelectiveS4DLayer swapped in for the SSM core."""
+
+    def __init__(self, d_model: int, d_state: int, dt: float):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model)
+        self.ssm = SelectiveS4DLayer(d_model, d_state, dt)
+        self.gate = nn.Linear(d_model, 2 * d_model)
+
+    def init_state(self, batch_size, device):
+        return self.ssm.init_state(batch_size, device)
+
+    def step(self, u: torch.Tensor, state):
+        residual = u
+        x = self.norm(u)
+        y, state = self.ssm.step(x, state)
+        g = self.gate(y)
+        y1, y2 = g.chunk(2, dim=-1)
+        y = y1 * torch.sigmoid(y2)
+        return residual + y, state
+
+
 class ObstaclePredictor(nn.Module):
-    def __init__(self, K: int = 10, H: int = 10, d_model: int = 64,
-                 d_state: int = 16, n_layers: int = 2, dt: float = 0.1):
+    def __init__(self, K: int = 10, H: int = 10, d_model: int = 160,
+                 d_state: int = 40, n_layers: int = 3, dt: float = 0.1,
+                 selective: bool = True):
+        """selective=True (default, moderate research-scale ~330k params)
+        uses SelectiveS4DBlock (Mamba-style input-dependent discretization,
+        see its docstring); selective=False reproduces the original plain-
+        S4D predictor (~27.6k params at the old default sizes) for anyone
+        who wants to compare the two architectures directly."""
         super().__init__()
         self.K, self.H, self.dt = K, H, dt
+        block_cls = SelectiveS4DBlock if selective else S4DBlock
         self.input_proj = nn.Linear(2, d_model)
-        self.blocks = nn.ModuleList([S4DBlock(d_model, d_state, dt) for _ in range(n_layers)])
+        self.blocks = nn.ModuleList([block_cls(d_model, d_state, dt) for _ in range(n_layers)])
         self.output_proj = nn.Linear(d_model, 2)
 
     def forward(self, past_disp: torch.Tensor, future_disp_teacher: torch.Tensor | None = None,
@@ -207,12 +322,17 @@ class MultimodalObstaclePredictor(nn.Module):
     difference that only needs to show up in the decode.
     """
 
-    def __init__(self, K: int = 10, H: int = 10, d_model: int = 48,
-                 d_state: int = 12, n_layers: int = 2, dt: float = 0.1, n_modes: int = 3):
+    def __init__(self, K: int = 10, H: int = 10, d_model: int = 128,
+                 d_state: int = 32, n_layers: int = 3, dt: float = 0.1, n_modes: int = 2,
+                 selective: bool = True):
+        """selective=True (default, moderate research-scale ~210k params)
+        uses SelectiveS4DBlock; selective=False reproduces the original
+        plain-S4D multimodal predictor for direct comparison."""
         super().__init__()
         self.K, self.H, self.dt, self.n_modes = K, H, dt, n_modes
+        block_cls = SelectiveS4DBlock if selective else S4DBlock
         self.input_proj = nn.Linear(2, d_model)
-        self.blocks = nn.ModuleList([S4DBlock(d_model, d_state, dt) for _ in range(n_layers)])
+        self.blocks = nn.ModuleList([block_cls(d_model, d_state, dt) for _ in range(n_layers)])
         self.output_proj = nn.Linear(d_model, 2)
         # Init scale matters more than it looks like it should: too small
         # (0.1, tried first) and the M rollouts start out nearly identical,

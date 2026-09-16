@@ -14,10 +14,10 @@
     "n_collisions": 0
   },
   "ssm": {
-    "min_dist_mean": 1.8016680537262397,
-    "min_dist_std": 0.12096835985802698,
-    "max_lateral_deviation_mean": 2.3725402894908565,
-    "max_lateral_deviation_std": 0.6551598738827678,
+    "min_dist_mean": 1.7428478803846947,
+    "min_dist_std": 0.09506148401664456,
+    "max_lateral_deviation_mean": 2.0685272480143797,
+    "max_lateral_deviation_std": 0.4800877825319783,
     "n_collisions": 0
   }
 }

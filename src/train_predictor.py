@@ -27,7 +27,10 @@ K, H, DT = 10, 10, 0.1
 SENSOR_NOISE_STD = 0.05   # meters -- same order of magnitude as Part 3's sensor noise elsewhere in this project
 # Shared with moving_obstacle_demo.py so it constructs an identical model
 # before loading ../results/ssm_predictor.pt's state dict.
-MODEL_KWARGS = dict(K=K, H=H, d_model=48, d_state=12, n_layers=2, dt=DT)
+# Research-scale (Part 5): selective (Mamba-style) S4D blocks, ~330k params --
+# up from the original demo-scale plain-S4D model's ~27.6k (d_model=48,
+# d_state=12, n_layers=2, selective=False -- still available for comparison).
+MODEL_KWARGS = dict(K=K, H=H, d_model=160, d_state=40, n_layers=3, dt=DT, selective=True)
 
 
 def train(model, train_ds, val_ds, epochs=80, batch_size=64, lr=3e-3, weight_decay=1e-4, seed=0):
@@ -129,13 +132,19 @@ def evaluate(model, ds, dt=DT):
 if __name__ == "__main__":
     import os
 
-    ds = build_dataset(n_per_pattern=1500, K=K, H=H, dt=DT, seed=0)
+    # n_per_pattern/epochs trimmed from the plain-S4D model's 1500/80 to keep
+    # the ~12x larger selective-SSM model's CPU training time reasonable
+    # (this project trains on 2 CPU cores, no GPU) while still using enough
+    # data/steps for the bigger model to converge well past the old model's
+    # loss curve -- see the results below for whether that trade-off held up.
+    ds = build_dataset(n_per_pattern=800, K=K, H=H, dt=DT, seed=0)
     train_ds, val_ds, test_ds = split_dataset(ds)
     print(f"train={len(train_ds.past)}  val={len(val_ds.past)}  test={len(test_ds.past)}  "
           f"(sensor_noise_std={SENSOR_NOISE_STD} m)")
 
     model = ObstaclePredictor(**MODEL_KWARGS)
-    train(model, train_ds, val_ds, epochs=80, lr=2e-3, weight_decay=1e-4)
+    print(f"model params: {sum(p.numel() for p in model.parameters())}")
+    train(model, train_ds, val_ds, epochs=40, lr=2e-3, weight_decay=1e-4)
 
     test_noisy = add_observation_noise(test_ds, SENSOR_NOISE_STD, np.random.default_rng(999))
     print("\n--- Test set: ADE / FDE (meters), SSM predictor vs. baselines ---")

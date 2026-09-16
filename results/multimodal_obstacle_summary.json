@@ -8,17 +8,17 @@
       "n_collisions": 0
     },
     "ssm_uni": {
-      "min_dist_mean": 2.5053021682368244,
-      "min_dist_std": 0.5992991151801228,
-      "max_lateral_deviation_mean": 0.20591599507311711,
-      "max_lateral_deviation_std": 0.11780493893580277,
+      "min_dist_mean": 2.498559889528609,
+      "min_dist_std": 0.5983498106648656,
+      "max_lateral_deviation_mean": 0.20171338799579988,
+      "max_lateral_deviation_std": 0.10651541957713534,
       "n_collisions": 0
     },
     "ssm_mm": {
-      "min_dist_mean": 2.535864752952224,
-      "min_dist_std": 0.5621317029680133,
-      "max_lateral_deviation_mean": 0.23430785378822927,
-      "max_lateral_deviation_std": 0.15835330897339203,
+      "min_dist_mean": 2.579296961086575,
+      "min_dist_std": 0.5233745630188874,
+      "max_lateral_deviation_mean": 0.2661507032749497,
+      "max_lateral_deviation_std": 0.20016592986317336,
       "n_collisions": 0
     }
   },
@@ -31,17 +31,17 @@
       "n_collisions": 0
     },
     "ssm_uni": {
-      "min_dist_mean": 1.6995179035980679,
-      "min_dist_std": 0.10364807968331018,
-      "max_lateral_deviation_mean": 1.8153056256380136,
-      "max_lateral_deviation_std": 0.1524892780419919,
+      "min_dist_mean": 1.7047589315908755,
+      "min_dist_std": 0.07088053598981674,
+      "max_lateral_deviation_mean": 2.05130855330278,
+      "max_lateral_deviation_std": 0.3643033585436501,
       "n_collisions": 0
     },
     "ssm_mm": {
-      "min_dist_mean": 1.7740488165139092,
-      "min_dist_std": 0.10315271876679627,
-      "max_lateral_deviation_mean": 1.9257725999164828,
-      "max_lateral_deviation_std": 0.1429018581786044,
+      "min_dist_mean": 1.788461544830561,
+      "min_dist_std": 0.13519910922840847,
+      "max_lateral_deviation_mean": 2.1315119122603585,
+      "max_lateral_deviation_std": 0.41712687202158694,
       "n_collisions": 0
     }
   }
