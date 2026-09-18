@@ -329,23 +329,6 @@ Reproduce the full study with `python src/comparative_study.py` (~15 min on 2 CP
 cores), then `python src/research_plots.py` for the figures and `pip install
 highway-env imageio && python src/render_highwayenv.py` for the simulator replays.
 
-### Which combination is best, and is this publication-ready?
-
-**Best system: dynamic bicycle model + NMPC + multimodal SSM** — the only cell with
-zero collisions everywhere, and the best safety margin on the hardest case. If a
-single deployable recommendation were needed: NMPC + multimodal SSM for
-safety-critical prediction under ambiguity, with LTV-MPC's QP as a lighter-weight
-fallback where NMPC's tail latency isn't acceptable.
-
-**Publication readiness, stated plainly:** this is solid technical-report/portfolio
-quality — a real ablation matrix, matched-trial design, an honest per-trial (not just
-mean) visualization, a real 2D simulator replay, 21 references spanning 2024-2026
-SSM/MPC literature. It is **not** peer-review quality yet, for four concrete reasons:
-4 trials/cell is too few for a defensible confidence interval; 3 scenario families is
-narrow; CV/CTRV are reasonable but not the field's strongest current baselines (a
-submission would want a learned baseline like Trajectron++ or MTR); and all data is
-synthetic, with no real recorded pedestrian/vehicle trajectories.
-
 ## Repository layout
 
 ```
